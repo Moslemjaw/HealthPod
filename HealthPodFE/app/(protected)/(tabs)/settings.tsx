@@ -1,83 +1,217 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView } from "react-native";
+import { Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { colors, radius, shadow, spacing } from "@/constants/design";
+import { LinearGradient } from "expo-linear-gradient";
+import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
+import { colors, radius, shadow, spacing, gradients, typography } from "@/constants/design";
 import { routes } from "@/constants/routes";
 import { useHealth } from "@/context/HealthContext";
 
-const Row = ({
-  icon,
-  label,
-  onPress,
-  right,
-}: {
+type SettingRowProps = {
   icon: string;
   label: string;
   onPress?: () => void;
-  right?: React.ReactNode;
-}) => (
+  badge?: string;
+  color?: string;
+  bg?: string;
+  danger?: boolean;
+};
+
+const SettingRow = ({ icon, label, onPress, badge, color = colors.primary, bg = colors.surfaceTeal, danger = false }: SettingRowProps) => (
   <Pressable style={styles.row} onPress={onPress}>
-    <View style={styles.rowIcon}>
-      <Ionicons name={icon as any} size={18} color={colors.primary} />
+    <View style={[styles.rowIcon, { backgroundColor: danger ? colors.lightRed : bg }]}>
+      <Ionicons name={icon as any} size={20} color={danger ? colors.error : color} />
     </View>
-    <Text style={styles.rowLabel}>{label}</Text>
-    <View style={styles.rowRight}>{right || <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />}</View>
+    <Text style={[styles.rowLabel, danger && styles.rowLabelDanger]}>{label}</Text>
+    {badge ? (
+      <View style={styles.badge}>
+        <Text style={styles.badgeText}>{badge}</Text>
+      </View>
+    ) : (
+      <Ionicons name="chevron-forward" size={20} color={danger ? colors.error : colors.textMuted} />
+    )}
   </Pressable>
 );
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { user } = useHealth();
+  const { user, signOut, streak, deleteAllUsers } = useHealth();
+
+  const handleLogout = () => {
+    Alert.alert(
+      "Sign Out",
+      "Are you sure you want to sign out? Your data will be saved.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Sign Out", 
+          style: "destructive",
+          onPress: async () => {
+            await signOut();
+            router.replace(routes.onboarding);
+          }
+        }
+      ]
+    );
+  };
 
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Settings</Text>
+        <ScrollView 
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <Animated.View entering={FadeInDown.duration(500)}>
+            <Text style={styles.title}>Settings</Text>
+          </Animated.View>
 
-          <View style={styles.profileCard}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{(user?.name || "A").charAt(0).toUpperCase()}</Text>
-            </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>{user?.name || "Apple User"}</Text>
-              <Text style={styles.profileEmail}>{user?.email || "apple_0016614@healthpod.app"}</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-          </View>
-
-          <Text style={styles.sectionLabel}>ACCOUNT</Text>
-          <View style={styles.card}>
-            <Row icon="person-outline" label="Profile" onPress={() => router.push(routes.profile)} />
-            <Row
-              icon="notifications-outline"
-              label="Notifications"
-              onPress={() => router.push(routes.notifications)}
-            />
-            <Row icon="shield-checkmark-outline" label="Privacy" onPress={() => router.push(routes.privacy)} />
-          </View>
-
-          <Text style={styles.sectionLabel}>DEVICES</Text>
-          <View style={styles.card}>
-            <Row
-              icon="watch-outline"
-              label="Connected Devices"
-              onPress={() => router.push(routes.wearables)}
-              right={
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>2</Text>
+          {/* Profile Card */}
+          <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+            <Pressable style={styles.profileCard} onPress={() => router.push(routes.profile)}>
+              <LinearGradient
+                colors={gradients.primary}
+                style={styles.avatar}
+              >
+                <Text style={styles.avatarText}>
+                  {(user?.name || "A").charAt(0).toUpperCase()}
+                </Text>
+              </LinearGradient>
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>{user?.name || "HealthPod User"}</Text>
+                <Text style={styles.profileEmail}>{user?.email || "user@healthpod.app"}</Text>
+                <View style={styles.streakBadge}>
+                  <Ionicons name="flame" size={14} color={colors.warning} />
+                  <Text style={styles.streakText}>{streak.currentStreak} day streak</Text>
                 </View>
-              }
-            />
-            <Row icon="add-circle-outline" label="Add New Device" onPress={() => router.push(routes.addDevice)} />
-          </View>
+              </View>
+              <View style={styles.profileArrow}>
+                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+              </View>
+            </Pressable>
+          </Animated.View>
 
-          <Text style={styles.sectionLabel}>SUPPORT</Text>
-          <View style={styles.card}>
-            <Row icon="chatbubbles-outline" label="AI Health Assistant" onPress={() => router.push(routes.chat)} />
-            <Row icon="help-circle-outline" label="Help Center" onPress={() => router.push(routes.support)} />
-          </View>
+          {/* Account Section */}
+          <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+            <Text style={styles.sectionLabel}>ACCOUNT</Text>
+            <View style={styles.section}>
+              <SettingRow 
+                icon="person-outline" 
+                label="Profile" 
+                onPress={() => router.push(routes.profile)}
+                color={colors.accentPurple}
+                bg={colors.surfacePurple}
+              />
+              <SettingRow 
+                icon="notifications-outline" 
+                label="Notifications"
+                onPress={() => router.push(routes.notifications)}
+                color={colors.accentOrange}
+                bg={colors.surfaceOrange}
+              />
+              <SettingRow 
+                icon="shield-checkmark-outline" 
+                label="Privacy"
+                onPress={() => router.push(routes.privacy)}
+                color={colors.accentBlue}
+                bg={colors.surfaceBlue}
+              />
+            </View>
+          </Animated.View>
+
+          {/* Devices Section */}
+          <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+            <Text style={styles.sectionLabel}>DEVICES</Text>
+            <View style={styles.section}>
+              <SettingRow 
+                icon="watch-outline" 
+                label="Connected Devices"
+                onPress={() => router.push(routes.wearables)}
+                badge="2"
+              />
+              <SettingRow 
+                icon="add-circle-outline" 
+                label="Add New Device"
+                onPress={() => router.push(routes.addDevice)}
+              />
+            </View>
+          </Animated.View>
+
+          {/* Support Section */}
+          <Animated.View entering={FadeInUp.delay(400).duration(500)}>
+            <Text style={styles.sectionLabel}>SUPPORT</Text>
+            <View style={styles.section}>
+              <SettingRow 
+                icon="chatbubbles-outline" 
+                label="AI Health Assistant"
+                onPress={() => router.push(routes.chat)}
+                color={colors.accentPurple}
+                bg={colors.surfacePurple}
+              />
+              <SettingRow 
+                icon="help-circle-outline" 
+                label="Help Center"
+                onPress={() => router.push(routes.support)}
+                color={colors.accentBlue}
+                bg={colors.surfaceBlue}
+              />
+            </View>
+          </Animated.View>
+
+          {/* Sign Out Section */}
+          <Animated.View entering={FadeInUp.delay(500).duration(500)}>
+            <Text style={styles.sectionLabel}>SESSION</Text>
+            <View style={styles.section}>
+              <SettingRow 
+                icon="log-out-outline" 
+                label="Sign Out"
+                onPress={handleLogout}
+                danger
+              />
+            </View>
+          </Animated.View>
+
+          {/* Developer Section (Hidden or Bottom) */}
+          <Animated.View entering={FadeInUp.delay(550).duration(500)}>
+            <Text style={styles.sectionLabel}>DEVELOPER</Text>
+            <View style={styles.section}>
+              <SettingRow 
+                icon="trash-bin-outline" 
+                label="Delete All Users (Reset App)"
+                onPress={() => {
+                  Alert.alert(
+                    "Delete All Users", 
+                    "This will delete ALL local user accounts and reset the app. Cannot be undone.",
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      { 
+                        text: "Delete All", 
+                        style: "destructive", 
+                        onPress: async () => {
+                          await deleteAllUsers();
+                          router.replace(routes.onboarding);
+                        }
+                      }
+                    ]
+                  );
+                }}
+                danger
+              />
+            </View>
+          </Animated.View>
+
+          {/* App Info */}
+          <Animated.View 
+            entering={FadeInUp.delay(600).duration(500)}
+            style={styles.appInfo}
+          >
+            <Text style={styles.appVersion}>HealthPod v1.0.0</Text>
+            <Text style={styles.appCopy}>Made with ❤️ for your health</Text>
+          </Animated.View>
+
+          <View style={{ height: 120 }} />
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -94,102 +228,126 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: spacing.lg,
+    paddingTop: spacing.xl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
+    ...typography.h1,
     color: colors.textPrimary,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   profileCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     padding: spacing.md,
     marginBottom: spacing.xl,
-    ...shadow.sm,
+    ...shadow.md,
   },
   avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primary,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: spacing.md,
   },
   avatarText: {
+    ...typography.h2,
     color: colors.lightText,
-    fontWeight: "700",
-    fontSize: 20,
   },
   profileInfo: {
     flex: 1,
+    marginLeft: spacing.md,
   },
   profileName: {
-    fontWeight: "700",
+    ...typography.bodyMedium,
     color: colors.textPrimary,
-    fontSize: 16,
   },
   profileEmail: {
+    ...typography.small,
     color: colors.textSecondary,
-    fontSize: 13,
     marginTop: 2,
   },
-  sectionLabel: {
-    marginBottom: spacing.sm,
-    marginTop: spacing.md,
-    color: colors.textSecondary,
-    textTransform: "uppercase",
-    fontSize: 12,
-    letterSpacing: 0.8,
+  streakBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xxs,
+    marginTop: spacing.xs,
+    backgroundColor: colors.lightYellow,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.full,
+    alignSelf: "flex-start",
+  },
+  streakText: {
+    ...typography.tiny,
+    color: colors.warning,
     fontWeight: "600",
   },
-  card: {
+  profileArrow: {
+    padding: spacing.xs,
+  },
+  sectionLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    letterSpacing: 1,
+    marginBottom: spacing.sm,
+    marginTop: spacing.md,
+    marginLeft: spacing.xs,
+  },
+  section: {
     backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.sm,
-    marginBottom: spacing.lg,
+    borderRadius: radius.xl,
+    padding: spacing.xs,
+    marginBottom: spacing.md,
     ...shadow.sm,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.md,
   },
   rowIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceTeal,
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: spacing.sm,
   },
   rowLabel: {
     flex: 1,
-    fontWeight: "600",
+    ...typography.bodyMedium,
     color: colors.textPrimary,
-    fontSize: 15,
+    marginLeft: spacing.sm,
   },
-  rowRight: {
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: spacing.xs,
+  rowLabelDanger: {
+    color: colors.error,
   },
   badge: {
     backgroundColor: colors.primary,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    minWidth: 24,
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    minWidth: 28,
     alignItems: "center",
   },
   badgeText: {
+    ...typography.tiny,
     color: colors.lightText,
     fontWeight: "700",
-    fontSize: 12,
+  },
+  appInfo: {
+    alignItems: "center",
+    marginTop: spacing.xl,
+  },
+  appVersion: {
+    ...typography.small,
+    color: colors.textMuted,
+  },
+  appCopy: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: spacing.xxs,
   },
 });

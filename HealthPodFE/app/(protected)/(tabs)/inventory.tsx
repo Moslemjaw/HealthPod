@@ -1,35 +1,132 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, RefreshControl, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, radius, shadow, spacing } from "@/constants/design";
-import { getMedications } from "@/services/api";
-import { Medication } from "@/types";
+import { useFocusEffect } from "@react-navigation/native";
+import Animated, { FadeInDown, FadeInUp, Layout } from "react-native-reanimated";
+import { colors, radius, shadow, spacing, typography } from "@/constants/design";
+import { getMedications, getDevices, dispenseFromContainer, getArduinoStatus, resetArduinoConnection } from "@/services/api";
+import { useRouter } from "expo-router";
+import { DeviceInfo, Medication } from "@/types";
 
 export default function InventoryScreen() {
+  const router = useRouter();
   const [medications, setMedications] = useState<Medication[]>([]);
+  const [device, setDevice] = useState<DeviceInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dispensing, setDispensing] = useState<number | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+
+  const fetchData = async () => {
+    try {
+      console.log("[Inventory Screen] Starting fetch...");
+      const [medsData, devicesData] = await Promise.all([
+        getMedications(),
+        getDevices(),
+      ]);
+      console.log("[Inventory Screen] Fetched medications:", medsData);
+      console.log("[Inventory Screen] Fetched devices:", devicesData);
+      console.log("[Inventory Screen] Medication count:", medsData.length);
+      console.log("[Inventory Screen] Device count:", devicesData.length);
+      
+      setMedications(medsData);
+      setDevice(devicesData[0] || null);
+      
+      checkConnection();
+    } catch (error) {
+      console.error("[Inventory Screen] Failed to fetch inventory data", error);
+      Alert.alert("Error", `Failed to load inventory: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  const checkConnection = async () => {
+    setCheckingStatus(true);
+    try {
+      const status = await getArduinoStatus() as { isConnected: boolean };
+      setIsConnected(!!status.isConnected);
+    } catch (e) {
+      setIsConnected(false);
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  const handleReconnect = async () => {
+    setCheckingStatus(true);
+    try {
+      await resetArduinoConnection();
+      // Wait a bit then check
+      setTimeout(checkConnection, 2000);
+    } catch (e) {
+      Alert.alert("Connection Failed", "Could not reconnect to the device.");
+      setCheckingStatus(false);
+    }
+  };
 
   useEffect(() => {
-    getMedications()
-      .then(setMedications)
-      .finally(() => setLoading(false));
+    fetchData().finally(() => setLoading(false));
   }, []);
 
-  const inStock = useMemo(
-    () => medications.filter((med) => med.remaining > med.refillThreshold),
-    [medications]
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!loading) {
+        fetchData();
+      }
+    }, [loading])
   );
 
-  const lowStock = useMemo(
-    () => medications.filter((med) => med.remaining <= med.refillThreshold),
-    [medications]
-  );
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    fetchData().finally(() => setRefreshing(false));
+  }, []);
+
+  const handleDispense = async (containerNumber: number) => {
+    if (!device) return;
+    
+    setDispensing(containerNumber);
+    try {
+      await dispenseFromContainer(device.id, containerNumber);
+      Alert.alert("Dispensing", `Dispensing from Container ${containerNumber}...`);
+      setTimeout(() => {
+        fetchData(); 
+        setDispensing(null);
+      }, 3000);
+    } catch (error) {
+      Alert.alert("Error", "Failed to dispense. Check device connection.");
+      setDispensing(null);
+    }
+  };
+
+  const handleEdit = (containerNumber: number, medName?: string, dosage?: string, schedule?: string) => {
+    if (!device) return;
+    router.push({
+      pathname: "/(protected)/edit-container",
+      params: { 
+        deviceId: device.id, 
+        containerNumber,
+        medName: medName || "",
+        dosage: dosage || "",
+        schedule: schedule || ""
+      }
+    });
+  };
+
+  // Map sensor values to UI status
+  const getStockStatus = (stockLevel: string) => {
+    if (stockLevel === "FULL") return { label: "In Stock", color: colors.success, bg: colors.surfaceTeal, icon: "checkmark-circle" };
+    if (stockLevel === "MED") return { label: "Available", color: colors.primary, bg: colors.surfaceBlue, icon: "information-circle" };
+    return { label: "Empty", color: colors.error, bg: colors.lightRed, icon: "alert-circle" };
+  };
 
   if (loading) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safe}>
-          <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+          <View style={styles.loaderContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
         </SafeAreaView>
       </View>
     );
@@ -38,72 +135,139 @@ export default function InventoryScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Inventory</Text>
-          <Text style={styles.subtitle}>Track your medication stock</Text>
-
-          <View style={styles.summaryRow}>
-            <View style={[styles.summaryCard, styles.summarySuccess]}>
-              <Ionicons name="checkmark-circle" size={24} color={colors.success} />
-              <Text style={styles.summaryValue}>{inStock.length}</Text>
-              <Text style={styles.summaryLabel}>In Stock</Text>
+        <ScrollView 
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {/* Header */}
+          <Animated.View entering={FadeInDown.duration(500)} style={styles.headerRow}>
+            <View>
+              <Text style={styles.title}>Inventory</Text>
+              <Text style={styles.subtitle}>Manage dispenser & medications</Text>
             </View>
-            <View style={[styles.summaryCard, styles.summaryWarning]}>
-              <Ionicons name="warning" size={24} color={colors.warning} />
-              <Text style={styles.summaryValue}>{lowStock.length}</Text>
-              <Text style={styles.summaryLabel}>Low Stock</Text>
-            </View>
-          </View>
+            <Pressable onPress={onRefresh} style={styles.refreshBtn}>
+              <Ionicons name="refresh" size={20} color={colors.primary} />
+            </Pressable>
+          </Animated.View>
 
-          {medications.map((med) => {
-            const percent = Math.round((med.remaining / med.total) * 100);
-            const isLowStock = med.remaining <= med.refillThreshold;
-            return (
-              <View key={med.id} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={[styles.medIcon, { backgroundColor: colors.surfaceTeal }]}>
-                    <Text style={styles.medIconText}>*</Text>
-                  </View>
-                  <View style={styles.medInfo}>
-                    <Text style={styles.medName}>{med.name}</Text>
-                    <Text style={styles.medDosage}>{med.dosage}</Text>
-                  </View>
-                  {isLowStock && (
-                    <View style={styles.reorderPill}>
-                      <Ionicons name="warning" size={12} color={colors.warning} />
-                      <Text style={styles.reorderText}>Reorder Soon</Text>
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.scheduleRow}>
-                  <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
-                  <Text style={styles.scheduleText}>{med.schedule}</Text>
-                </View>
-
-                <View style={styles.remainingRow}>
-                  <Text style={styles.remainingLabel}>Remaining</Text>
-                  <Text style={styles.remainingValue}>
-                    {med.remaining} / {med.total}
+          {/* Section 1: Device Status */}
+          <Animated.View entering={FadeInDown.delay(100).duration(500)} style={styles.section}>
+            <Text style={styles.sectionTitle}>Device Status</Text>
+            <View style={[styles.statusCard, isConnected ? styles.statusConnected : styles.statusDisconnected]}>
+              <View style={styles.statusInfo}>
+                <Ionicons 
+                  name={isConnected ? "bluetooth" : "alert-circle"} 
+                  size={24} 
+                  color={isConnected ? colors.success : colors.error} 
+                />
+                <View>
+                  <Text style={styles.statusTitle}>
+                    {isConnected ? "Connected" : "Disconnected"}
+                  </Text>
+                  <Text style={styles.statusSubtitle}>
+                    {device?.name || "HealthPod Device"}
                   </Text>
                 </View>
-                <View style={styles.progressTrack}>
-                  <View style={[styles.progressFill, { width: `${percent}%` }]} />
-                </View>
-
-                <Pressable style={styles.refillButton}>
-                  <Ionicons name="cart-outline" size={16} color={colors.primary} />
-                  <Text style={styles.refillText}>Order Refill</Text>
-                </Pressable>
               </View>
-            );
-          })}
+              
+              {!isConnected && (
+                <Pressable 
+                  style={styles.reconnectBtn} 
+                  onPress={handleReconnect}
+                  disabled={checkingStatus}
+                >
+                  {checkingStatus ? (
+                    <ActivityIndicator size="small" color={colors.lightText} />
+                  ) : (
+                    <Text style={styles.reconnectText}>Reconnect</Text>
+                  )}
+                </Pressable>
+              )}
+            </View>
+          </Animated.View>
+
+          {/* Section 2: My Medications (Merged Stock Status) */}
+          {device && device.containers && (
+            <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.section}>
+              <Text style={styles.sectionTitle}>My Medications</Text>
+              
+              {[1, 2, 3].map((num) => {
+                const container = device.containers.find(c => c.number === num);
+                // Find med details if available
+                const medDetails = medications.find(m => m.name === container?.medicationName);
+                const isDispensing = dispensing === num;
+                const status = getStockStatus(container?.stockLevel || "FULL");
+                
+                return (
+                  <Animated.View 
+                    key={num}
+                    entering={FadeInUp.delay(300 + num * 100).duration(400)}
+                    layout={Layout.springify()}
+                    style={styles.medCard}
+                  >
+                    <View style={styles.medHeader}>
+                      <View style={[styles.medIcon, { backgroundColor: status.bg }]}>
+                        <Ionicons name="medical" size={20} color={status.color} />
+                      </View>
+                      <View style={styles.medInfo}>
+                        <View style={styles.medTitleRow}>
+                          <Text style={styles.medName}>
+                            {container?.medicationName || `Container ${num}`}
+                          </Text>
+                          <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+                            <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.medDosage}>
+                          {container?.dosage || "—"}
+                        </Text>
+                      </View>
+                      <Pressable 
+                        style={styles.editBtn}
+                        onPress={() => handleEdit(num, container?.medicationName, container?.dosage, medDetails?.schedule)}
+                      >
+                        <Ionicons name="pencil" size={16} color={colors.primary} />
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.cardFooter}>
+                      <View style={styles.scheduleRow}>
+                        <Ionicons name="time-outline" size={14} color={colors.textMuted} />
+                        <Text style={styles.scheduleText}>
+                          {medDetails?.schedule || "No Schedule"}
+                        </Text>
+                      </View>
+
+                      <Pressable 
+                        style={[
+                          styles.dispenseBtn, 
+                          (isDispensing || !container?.medicationName) && styles.dispenseBtnDisabled
+                        ]}
+                        onPress={() => handleDispense(num)}
+                        disabled={isDispensing || !container?.medicationName}
+                      >
+                        {isDispensing ? (
+                          <ActivityIndicator size="small" color={colors.lightText} />
+                        ) : (
+                          <>
+                            <Text style={styles.dispenseBtnText}>Dispense</Text>
+                            <Ionicons name="arrow-down-circle-outline" size={16} color={colors.lightText} />
+                          </>
+                        )}
+                      </Pressable>
+                    </View>
+                  </Animated.View>
+                );
+              })}
+            </Animated.View>
+          )}
+
+          <View style={{ height: 100 }} />
         </ScrollView>
       </SafeAreaView>
-
-      <Pressable style={styles.fab}>
-        <Ionicons name="add" size={26} color={colors.lightText} />
-      </Pressable>
+      
+      {/* FAB Removed as per request */}
     </View>
   );
 }
@@ -116,168 +280,207 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
   },
-  loader: {
+  loaderContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
   content: {
     padding: spacing.lg,
-    paddingBottom: 100,
+    paddingTop: spacing.md,
+  },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: spacing.lg,
+  },
+  refreshBtn: {
+    padding: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.full,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
+    ...typography.h1,
     color: colors.textPrimary,
-    marginBottom: 4,
+    marginBottom: spacing.xxs,
   },
   subtitle: {
+    ...typography.body,
     color: colors.textSecondary,
-    marginBottom: spacing.lg,
-    fontSize: 14,
   },
-  summaryRow: {
-    flexDirection: "row",
-    gap: spacing.md,
-    marginBottom: spacing.lg,
+  section: {
+    marginBottom: spacing.xl,
   },
-  summaryCard: {
-    flex: 1,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    alignItems: "center",
-  },
-  summarySuccess: {
-    backgroundColor: colors.lightGreen,
-  },
-  summaryWarning: {
-    backgroundColor: colors.lightYellow,
-  },
-  summaryValue: {
-    fontSize: 24,
-    fontWeight: "700",
-    marginTop: spacing.xs,
+  sectionTitle: {
+    ...typography.h3,
     color: colors.textPrimary,
+    marginBottom: spacing.md,
   },
-  summaryLabel: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    marginTop: 4,
-  },
-  card: {
+  statusCard: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
-    marginBottom: spacing.md,
-    ...shadow.sm,
-  },
-  cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: spacing.sm,
+    justifyContent: "space-between",
+    borderWidth: 1,
+    ...shadow.sm,
+  },
+  statusConnected: {
+    borderColor: colors.success,
+    backgroundColor: colors.surfaceTeal,
+  },
+  statusDisconnected: {
+    borderColor: colors.error,
+    backgroundColor: colors.lightRed,
+  },
+  statusInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  statusTitle: {
+    ...typography.body,
+    fontWeight: "700",
+    color: colors.textPrimary,
+  },
+  statusSubtitle: {
+    ...typography.small,
+    color: colors.textSecondary,
+  },
+  reconnectBtn: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.full,
+  },
+  reconnectText: {
+    ...typography.caption,
+    color: colors.lightText,
+    fontWeight: "600",
+  },
+  containersGrid: {
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  stockCard: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    ...shadow.sm,
+  },
+  stockHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: spacing.sm,
+  },
+  stockTitle: {
+    ...typography.small,
+    fontWeight: "700",
+  },
+  stockBody: {
+    padding: spacing.md,
+    alignItems: "center",
+  },
+  stockStatus: {
+    ...typography.small,
+    fontWeight: "600",
+  },
+  medCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    ...shadow.sm,
+  },
+  medHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.md,
   },
   medIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceTeal,
+    width: 44,
+    height: 44,
+    borderRadius: radius.lg,
     alignItems: "center",
     justifyContent: "center",
   },
-  medIconText: {
-    fontSize: 20,
-    color: colors.primary,
-    fontWeight: "700",
-  },
   medInfo: {
     flex: 1,
-    marginLeft: spacing.sm,
+    marginLeft: spacing.md,
   },
-  medName: {
-    fontWeight: "700",
-    color: colors.textPrimary,
-    fontSize: 16,
-  },
-  medDosage: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    marginTop: 2,
-  },
-  reorderPill: {
+  medTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    backgroundColor: colors.lightYellow,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: 999,
+    gap: spacing.sm,
   },
-  reorderText: {
-    color: colors.warning,
+  statusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  medName: {
+    ...typography.bodyMedium,
+    color: colors.textPrimary,
     fontWeight: "600",
-    fontSize: 11,
+  },
+  medDosage: {
+    ...typography.small,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  editBtn: {
+    padding: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.full,
+  },
+  cardFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: spacing.xs,
   },
   scheduleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginTop: spacing.sm,
+    gap: 4,
+    backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
   },
   scheduleText: {
+    ...typography.caption,
     color: colors.textSecondary,
-    fontSize: 13,
   },
-  remainingRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: spacing.sm,
-  },
-  remainingLabel: {
-    color: colors.textSecondary,
-    fontSize: 13,
-  },
-  remainingValue: {
-    fontWeight: "600",
-    color: colors.textPrimary,
-    fontSize: 13,
-  },
-  progressTrack: {
-    height: 6,
-    backgroundColor: colors.border,
-    borderRadius: 999,
-    marginTop: spacing.sm,
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: colors.warning,
-    borderRadius: 999,
-    minWidth: 4,
-  },
-  refillButton: {
-    marginTop: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceTeal,
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 6,
-  },
-  refillText: {
-    color: colors.primary,
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  fab: {
-    position: "absolute",
-    right: spacing.lg,
-    bottom: 100,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  dispenseBtn: {
     backgroundColor: colors.primary,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    ...shadow.card,
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: radius.md,
+  },
+  dispenseBtnDisabled: {
+    backgroundColor: colors.textMuted,
+    opacity: 0.5,
+  },
+  dispenseBtnText: {
+    color: colors.lightText,
+    fontSize: 12,
+    fontWeight: "700",
   },
 });

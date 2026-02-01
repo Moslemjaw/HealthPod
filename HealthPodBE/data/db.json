@@ -1,0 +1,25 @@
+{
+  "devices": [
+    {
+      "id": "b3c741de-1382-4857-aca0-425001678973",
+      "type": "healthpod_dispenser",
+      "name": "HealthPod Dispenser",
+      "serialNumber": "115200",
+      "containers": [
+        {
+          "number": 1,
+          "stockLevel": "LOW"
+        },
+        {
+          "number": 2,
+          "stockLevel": "LOW"
+        },
+        {
+          "number": 3,
+          "stockLevel": "LOW"
+        }
+      ]
+    }
+  ],
+  "medications": []
+}

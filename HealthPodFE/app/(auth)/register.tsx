@@ -1,111 +1,199 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, TextInput, View, Pressable } from "react-native";
+import { StyleSheet, Text, TextInput, View, Pressable, KeyboardAvoidingView, Platform, Alert, ScrollView, Image } from "react-native";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen } from "@/components/Screen";
+import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { PrimaryButton } from "@/components/PrimaryButton";
-import { colors, radius, shadow, spacing } from "@/constants/design";
+import { colors, radius, shadow, spacing, typography } from "@/constants/design";
 import { routes } from "@/constants/routes";
 import { useHealth } from "@/context/HealthContext";
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { signIn } = useHealth();
+  const { signUp } = useHealth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleSignUp = async () => {
+    if (!name.trim()) {
+      Alert.alert("Name Required", "Please enter your full name.");
+      return;
+    }
+    if (!email.trim()) {
+      Alert.alert("Email Required", "Please enter your email address.");
+      return;
+    }
+    if (!password.trim() || password.length < 8) {
+      Alert.alert("Password Required", "Please enter a password with at least 8 characters.");
+      return;
+    }
+    if (!agreed) {
+      Alert.alert("Agreement Required", "Please agree to the Terms of Service and Privacy Policy.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const success = await signUp(email.trim(), password, name.trim());
+      if (success) {
+        router.replace(routes.profileSetup);
+      } else {
+        Alert.alert(
+          "Account Exists",
+          "An account with this email already exists. Please sign in instead.",
+          [
+            { text: "OK", style: "cancel" },
+            { text: "Sign In", onPress: () => router.replace(routes.login) }
+          ]
+        );
+      }
+    } catch (error) {
+      Alert.alert("Error", "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#1A1F3A", "#1A1F3A"]} style={styles.header}>
-        <View style={styles.hero}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>❤</Text>
-          </View>
-          <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Start your personalized health journey</Text>
-        </View>
-      </LinearGradient>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.keyboardView}
+      >
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <Animated.View 
+            entering={FadeInDown.delay(100).duration(600).springify()}
+            style={styles.header}
+          >
+            <Pressable onPress={() => router.back()} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+            </Pressable>
+            <View style={styles.titleContainer}>
+              <View style={styles.logoWrapper}>
+                <Image 
+                  source={require("@/assets/HealthPodLogo.png")} 
+                  style={styles.logoSmall} 
+                  resizeMode="contain" 
+                />
+              </View>
+              <Text style={styles.title}>Create Account</Text>
+              <Text style={styles.subtitle}>Start your personalized health journey today.</Text>
+            </View>
+          </Animated.View>
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Full Name *</Text>
-        <View style={styles.inputContainer}>
-          <Ionicons name="person-outline" size={18} color={colors.textSecondary} style={styles.inputIcon} />
-          <TextInput
-            placeholder="John Doe"
-            value={name}
-            onChangeText={setName}
-            style={styles.input}
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
+          <Animated.View 
+            entering={FadeInUp.delay(300).duration(600).springify()}
+            style={styles.form}
+          >
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Full Name</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons name="person-outline" size={20} color={colors.textMuted} style={styles.inputIcon} />
+                <TextInput
+                  placeholder="John Doe"
+                  value={name}
+                  onChangeText={setName}
+                  style={styles.input}
+                  placeholderTextColor={colors.textMuted}
+                  editable={!loading}
+                />
+              </View>
+            </View>
 
-        <Text style={styles.label}>Email *</Text>
-        <View style={styles.inputContainer}>
-          <Ionicons name="mail-outline" size={18} color={colors.textSecondary} style={styles.inputIcon} />
-          <TextInput
-            placeholder="you@healthpod.app"
-            value={email}
-            onChangeText={setEmail}
-            style={styles.input}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholderTextColor={colors.textMuted}
-          />
-        </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Email</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons name="mail-outline" size={20} color={colors.textMuted} style={styles.inputIcon} />
+                <TextInput
+                  placeholder="Enter your email"
+                  value={email}
+                  onChangeText={setEmail}
+                  style={styles.input}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  placeholderTextColor={colors.textMuted}
+                  editable={!loading}
+                />
+              </View>
+            </View>
 
-        <Text style={styles.label}>Password *</Text>
-        <View style={styles.inputContainer}>
-          <Ionicons name="lock-closed-outline" size={18} color={colors.textSecondary} style={styles.inputIcon} />
-          <TextInput
-            placeholder="Min. 8 characters"
-            value={password}
-            onChangeText={setPassword}
-            style={styles.input}
-            secureTextEntry={!showPassword}
-            placeholderTextColor={colors.textMuted}
-          />
-          <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-            <Ionicons name={showPassword ? "eye-outline" : "eye-off-outline"} size={18} color={colors.textSecondary} />
-          </Pressable>
-        </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Password</Text>
+              <View style={styles.inputContainer}>
+                <Ionicons name="lock-closed-outline" size={20} color={colors.textMuted} style={styles.inputIcon} />
+                <TextInput
+                  placeholder="Min. 8 characters"
+                  value={password}
+                  onChangeText={setPassword}
+                  style={styles.input}
+                  secureTextEntry={!showPassword}
+                  placeholderTextColor={colors.textMuted}
+                  editable={!loading}
+                />
+                <Pressable onPress={() => setShowPassword(!showPassword)} style={styles.eyeButton}>
+                  <Ionicons 
+                    name={showPassword ? "eye-outline" : "eye-off-outline"} 
+                    size={20} 
+                    color={colors.textMuted} 
+                  />
+                </Pressable>
+              </View>
+            </View>
 
-        <Text style={styles.terms}>
-          By creating an account, you agree to our{" "}
-          <Text style={styles.termsLink}>Terms of Service</Text> and{" "}
-          <Text style={styles.termsLink}>Privacy Policy</Text>
-        </Text>
+            <Pressable 
+              style={styles.checkboxRow} 
+              onPress={() => setAgreed(!agreed)}
+            >
+              <View style={[styles.checkbox, agreed && styles.checkboxChecked]}>
+                {agreed && <Ionicons name="checkmark" size={14} color={colors.lightText} />}
+              </View>
+              <Text style={styles.checkboxText}>
+                I agree to the{" "}
+                <Text style={styles.linkText}>Terms of Service</Text> and{" "}
+                <Text style={styles.linkText}>Privacy Policy</Text>
+              </Text>
+            </Pressable>
 
-        <PrimaryButton
-          title="Create Account"
-          onPress={() => {
-            signIn(email || "new@healthpod.app", name || undefined);
-            router.replace(routes.profileSetup);
-          }}
-        />
+            <View style={styles.buttonContainer}>
+              <PrimaryButton
+                title={loading ? "Creating Account..." : "Sign Up"}
+                size="lg"
+                onPress={handleSignUp}
+                disabled={loading}
+              />
+            </View>
 
-        <Text style={styles.orText}>or sign up with</Text>
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>Or sign up with</Text>
+              <View style={styles.dividerLine} />
+            </View>
 
-        <View style={styles.socialRow}>
-          <Pressable style={styles.socialButton}>
-            <Text style={styles.socialText}>G</Text>
-            <Text style={styles.socialLabel}>Google</Text>
-          </Pressable>
-          <Pressable style={styles.socialButton}>
-            <Ionicons name="logo-apple" size={20} color={colors.primary} />
-            <Text style={styles.socialLabel}>Apple</Text>
-          </Pressable>
-        </View>
+            <View style={styles.socialRow}>
+              <Pressable style={styles.socialButton}>
+                <Ionicons name="logo-google" size={22} color={colors.textPrimary} />
+              </Pressable>
+              <Pressable style={styles.socialButton}>
+                <Ionicons name="logo-apple" size={24} color={colors.textPrimary} />
+              </Pressable>
+            </View>
 
-        <Text style={styles.helper}>
-          Already have an account?{" "}
-          <Text style={styles.link} onPress={() => router.replace(routes.login)}>
-            Sign in
-          </Text>
-        </Text>
-      </View>
+            <View style={styles.footerRow}>
+              <Text style={styles.footerText}>Already have an account?</Text>
+              <Pressable onPress={() => router.replace(routes.login)}>
+                <Text style={styles.footerLink}>Sign in</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -115,130 +203,167 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingTop: 60,
-    paddingBottom: spacing.xl * 1.5,
-    paddingHorizontal: spacing.lg,
+  keyboardView: {
+    flex: 1,
   },
-  hero: {
+  scrollContent: {
+    flexGrow: 1,
+    padding: spacing.xl,
+    justifyContent: "center",
+  },
+  header: {
+    marginBottom: spacing.xl,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: "center",
+    marginBottom: spacing.lg,
+    marginLeft: -spacing.xs,
+  },
+  titleContainer: {
+    gap: spacing.xs,
     alignItems: "center",
   },
-  logo: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    backgroundColor: colors.primary,
+  logoWrapper: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surfaceTeal,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
     ...shadow.sm,
+    overflow: "hidden",
   },
-  logoText: {
-    fontSize: 28,
-    color: colors.lightText,
+  logoSmall: {
+    width: 56,
+    height: 56,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: colors.lightText,
-    marginTop: spacing.sm,
+    ...typography.h1,
+    color: colors.textPrimary,
   },
   subtitle: {
-    marginTop: 6,
-    color: "#CBD5E1",
-    fontSize: 14,
+    ...typography.body,
+    color: colors.textSecondary,
   },
-  card: {
-    flex: 1,
-    marginTop: -30,
-    backgroundColor: colors.card,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingTop: spacing.xl,
-    ...shadow.card,
+  form: {
+    gap: spacing.lg,
+  },
+  inputGroup: {
+    gap: spacing.xs,
   },
   label: {
+    ...typography.small,
     fontWeight: "600",
-    marginBottom: spacing.xs,
-    marginTop: spacing.md,
     color: colors.textPrimary,
-    fontSize: 14,
+    marginLeft: spacing.xxs,
   },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
-    marginBottom: spacing.md,
+    borderColor: colors.border,
+    height: 56,
   },
   inputIcon: {
-    marginRight: spacing.xs,
+    marginLeft: spacing.md,
+    marginRight: spacing.sm,
   },
   input: {
     flex: 1,
-    paddingVertical: spacing.sm,
+    height: "100%",
     color: colors.textPrimary,
     fontSize: 16,
   },
-  eyeIcon: {
-    padding: spacing.xs,
+  eyeButton: {
+    padding: spacing.md,
   },
-  terms: {
+  checkboxRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
     marginTop: spacing.xs,
-    marginBottom: spacing.lg,
-    color: colors.textSecondary,
-    fontSize: 13,
-    lineHeight: 20,
   },
-  termsLink: {
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.xs,
+    borderWidth: 2,
+    borderColor: colors.textMuted,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkboxText: {
+    flex: 1,
+    ...typography.small,
+    color: colors.textSecondary,
+    lineHeight: 22,
+  },
+  linkText: {
     color: colors.primary,
-    fontWeight: "600",
+    fontWeight: "700",
   },
-  orText: {
-    textAlign: "center",
-    color: colors.textSecondary,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
+  buttonContainer: {
+    marginTop: spacing.sm,
+  },
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: spacing.md,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  dividerText: {
+    marginHorizontal: spacing.md,
+    color: colors.textMuted,
     fontSize: 13,
+    fontWeight: "500",
   },
   socialRow: {
     flexDirection: "row",
-    gap: spacing.md,
+    justifyContent: "center",
+    gap: spacing.lg,
     marginBottom: spacing.lg,
   },
   socialButton: {
-    flex: 1,
+    width: 64,
+    height: 64,
+    borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm,
+    borderColor: colors.border,
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.card,
+    ...shadow.sm,
+  },
+  footerRow: {
     flexDirection: "row",
     justifyContent: "center",
+    alignItems: "center",
     gap: spacing.xs,
+    paddingBottom: spacing.lg,
   },
-  socialText: {
-    fontSize: 18,
+  footerText: {
+    ...typography.body,
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  footerLink: {
+    ...typography.body,
+    fontSize: 14,
     fontWeight: "700",
     color: colors.primary,
   },
-  socialLabel: {
-    color: colors.primary,
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  helper: {
-    marginTop: spacing.sm,
-    textAlign: "center",
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  link: {
-    color: colors.primary,
-    fontWeight: "600",
-  },
 });
-

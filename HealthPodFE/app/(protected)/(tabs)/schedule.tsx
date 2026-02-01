@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, radius, shadow, spacing } from "@/constants/design";
+import { useFocusEffect } from "@react-navigation/native";
+import Animated, { FadeInDown, FadeInUp, Layout, SlideInRight } from "react-native-reanimated";
+import { colors, radius, shadow, spacing, typography } from "@/constants/design";
 import { confirmSchedule, getMedications, getSchedules } from "@/services/api";
 import { Medication, ScheduleItem } from "@/types";
 
@@ -9,14 +11,43 @@ export default function ScheduleScreen() {
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    Promise.all([getSchedules(), getMedications()])
-      .then(([scheduleData, medData]) => {
-        setSchedules(scheduleData);
-        setMedications(medData);
-      })
-      .finally(() => setLoading(false));
+  const fetchData = async () => {
+    try {
+      setError(null);
+      console.log("[Schedule Screen] Starting fetch...");
+      const [scheduleData, medData] = await Promise.all([
+        getSchedules(),
+        getMedications(),
+      ]);
+      console.log("[Schedule Screen] Fetched schedules:", scheduleData);
+      console.log("[Schedule Screen] Fetched medications:", medData);
+      console.log("[Schedule Screen] Schedule count:", scheduleData.length);
+      console.log("[Schedule Screen] Medication count:", medData.length);
+      
+      setSchedules(scheduleData);
+      setMedications(medData);
+    } catch (err) {
+      console.error("[Schedule Screen] Error fetching schedule data:", err);
+      setError(`Failed to load schedule: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchData();
+    }, [])
+  );
+
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    fetchData();
   }, []);
 
   const confirmedCount = useMemo(
@@ -25,15 +56,21 @@ export default function ScheduleScreen() {
   );
 
   const handleConfirm = async (id: string) => {
-    const updated = await confirmSchedule(id);
-    setSchedules((prev) => prev.map((item) => (item.id === id ? updated : item)));
+    try {
+      const updated = await confirmSchedule(id);
+      setSchedules((prev) => prev.map((item) => (item.id === id ? { ...item, ...updated } : item)));
+    } catch (err) {
+      console.error("Error confirming schedule:", err);
+    }
   };
 
   if (loading) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safe}>
-          <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+          <View style={styles.loaderContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
         </SafeAreaView>
       </View>
     );
@@ -44,86 +81,145 @@ export default function ScheduleScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Schedule</Text>
-          <Text style={styles.subtitle}>Today&apos;s medication reminders</Text>
+        <ScrollView 
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {/* Header */}
+          <Animated.View entering={FadeInDown.duration(500)}>
+            <Text style={styles.title}>Schedule</Text>
+            <Text style={styles.subtitle}>Today's medication plan</Text>
+          </Animated.View>
 
-          <View style={styles.progressCard}>
-            <View>
-              <Text style={styles.progressTitle}>Today&apos;s Progress</Text>
-              <Text style={styles.progressMeta}>
-                {confirmedCount} of {schedules.length} doses taken
+          {/* Error Message */}
+          {error && (
+            <View style={styles.errorCard}>
+              <Ionicons name="alert-circle" size={20} color={colors.error} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          {/* Progress Card */}
+          <Animated.View 
+            entering={FadeInDown.delay(100).duration(500)} 
+            style={styles.progressCard}
+          >
+            <View style={styles.progressContent}>
+              <View>
+                <Text style={styles.progressTitle}>Daily Progress</Text>
+                <Text style={styles.progressSubtitle}>
+                  {confirmedCount} of {schedules.length} doses taken
+                </Text>
+              </View>
+              <View style={styles.progressCircle}>
+                <Text style={styles.progressPercent}>{progressPercent}%</Text>
+              </View>
+            </View>
+            <View style={styles.progressBarBg}>
+              <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+            </View>
+          </Animated.View>
+
+          {/* Empty State */}
+          {schedules.length === 0 && !error && (
+            <View style={styles.emptyState}>
+              <Ionicons name="calendar-outline" size={64} color={colors.textMuted} />
+              <Text style={styles.emptyTitle}>No Medications Scheduled</Text>
+              <Text style={styles.emptyText}>
+                Add medications to your device to see them here
               </Text>
             </View>
-            <View style={styles.progressCircleContainer}>
-              <View style={styles.progressCircleOuter}>
-                <View
-                  style={[
-                    styles.progressCircleMask,
-                    {
-                      transform: [
-                        { rotate: `${(progressPercent / 100) * 360 - 90}deg` },
-                      ],
-                      borderTopColor: progressPercent > 0 ? colors.primary : "transparent",
-                      borderRightColor: progressPercent > 25 ? colors.primary : "transparent",
-                      borderBottomColor: progressPercent > 50 ? colors.primary : "transparent",
-                      borderLeftColor: progressPercent > 75 ? colors.primary : "transparent",
-                    },
-                  ]}
-                />
-                <View style={styles.progressCircleInner}>
-                  <Text style={styles.progressPercent}>{progressPercent}%</Text>
-                </View>
-              </View>
+          )}
+
+          {/* Timeline */}
+          {schedules.length > 0 && (
+            <View style={styles.timelineContainer}>
+              {schedules.map((item, index) => {
+                const med = medications.find((m) => m.id === item.medicationId);
+                const isConfirmed = item.isConfirmed;
+                const isLast = index === schedules.length - 1;
+
+                if (!med) {
+                  console.warn("[Schedule Screen] Medication not found for schedule item:", item);
+                  return null;
+                }
+
+                return (
+                  <Animated.View 
+                    key={item.id}
+                    entering={SlideInRight.delay(200 + index * 100).duration(400)}
+                    layout={Layout.springify()}
+                    style={styles.timelineItem}
+                  >
+                    {/* Timeline Left */}
+                    <View style={styles.timelineLeft}>
+                      <Text style={styles.timeText}>{item.time}</Text>
+                      <View style={styles.timelineLineContainer}>
+                        <View style={[
+                          styles.timelineDot,
+                          isConfirmed && styles.timelineDotDone
+                        ]} />
+                        {!isLast && (
+                          <View style={[
+                            styles.timelineLine,
+                            isConfirmed && styles.timelineLineDone
+                          ]} />
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Card */}
+                    <View style={[styles.scheduleCard, isConfirmed && styles.scheduleCardDone]}>
+                      <View style={styles.cardMain}>
+                        <View style={[
+                          styles.medIcon,
+                          isConfirmed && styles.medIconDone
+                        ]}>
+                          <Ionicons 
+                            name={isConfirmed ? "checkmark" : "medical"} 
+                            size={20} 
+                            color={isConfirmed ? colors.success : colors.primary} 
+                          />
+                        </View>
+                        <View style={styles.medInfo}>
+                          <Text style={[styles.medName, isConfirmed && styles.medNameDone]}>
+                            {med.name}
+                          </Text>
+                          <Text style={styles.medDose}>
+                            {med.dosage} • {item.frequency}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {!isConfirmed && (
+                        <Pressable
+                          style={styles.actionBtn}
+                          onPress={() => handleConfirm(item.id)}
+                        >
+                          <Text style={styles.actionText}>Take</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  </Animated.View>
+                );
+              })}
             </View>
-          </View>
+          )}
 
-          {schedules.map((item) => {
-            const med = medications.find((m) => m.id === item.medicationId);
-            const isConfirmed = item.isConfirmed;
-            return (
-              <View key={item.id} style={styles.card}>
-                <View style={styles.timeRow}>
-                  <Text style={styles.timeText}>{item.time}</Text>
-                  <Text style={styles.timeMeta}>{item.frequency}</Text>
-                </View>
-                <View style={styles.medRow}>
-                  <View style={styles.medIcon}>
-                    {isConfirmed ? (
-                      <Ionicons name="checkmark" size={18} color={colors.success} />
-                    ) : (
-                      <Text style={styles.medIconText}>*</Text>
-                    )}
-                  </View>
-                  <View style={styles.medInfo}>
-                    <Text style={styles.medName}>{med?.name || "Medication"}</Text>
-                    <Text style={styles.medDose}>{med?.dosage || "-"}</Text>
-                  </View>
-                </View>
-
-                <Pressable
-                  style={[styles.actionBtn, isConfirmed && styles.actionDone]}
-                  onPress={() => !isConfirmed && handleConfirm(item.id)}
-                  disabled={isConfirmed}
-                >
-                  <Ionicons
-                    name={isConfirmed ? "checkmark-circle" : "checkmark"}
-                    size={18}
-                    color={isConfirmed ? colors.success : colors.lightText}
-                  />
-                  <Text style={[styles.actionText, isConfirmed && styles.actionTextDone]}>
-                    {isConfirmed ? "Completed" : "Take Now"}
-                  </Text>
-                </Pressable>
-              </View>
-            );
-          })}
+          <View style={{ height: 100 }} />
         </ScrollView>
       </SafeAreaView>
 
-      <Pressable style={styles.fab}>
-        <Ionicons name="add" size={26} color={colors.lightText} />
-      </Pressable>
+      {/* FAB */}
+      <Animated.View 
+        entering={FadeInUp.delay(600).duration(400)}
+        style={styles.fabContainer}
+      >
+        <Pressable style={styles.fab}>
+          <Ionicons name="add" size={28} color={colors.lightText} />
+        </Pressable>
+      </Animated.View>
     </View>
   );
 }
@@ -136,169 +232,221 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
   },
-  loader: {
+  loaderContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
   content: {
     padding: spacing.lg,
-    paddingBottom: 100,
+    paddingTop: spacing.md,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
+    ...typography.h1,
     color: colors.textPrimary,
-    marginBottom: 4,
+    marginBottom: spacing.xxs,
   },
   subtitle: {
+    ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
-    fontSize: 14,
+  },
+  errorCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.lightRed,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    marginBottom: spacing.md,
+  },
+  errorText: {
+    ...typography.small,
+    color: colors.error,
+    flex: 1,
+  },
+  emptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: spacing.xxxl,
+    paddingHorizontal: spacing.xl,
+  },
+  emptyTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  emptyText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: "center",
   },
   progressCard: {
-    backgroundColor: colors.lightGreen,
-    borderRadius: radius.lg,
-    padding: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    ...shadow.sm,
+  },
+  progressContent: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: spacing.lg,
+    marginBottom: spacing.md,
   },
   progressTitle: {
-    fontWeight: "700",
+    ...typography.h3,
     color: colors.textPrimary,
-    fontSize: 16,
   },
-  progressMeta: {
+  progressSubtitle: {
+    ...typography.small,
     color: colors.textSecondary,
-    marginTop: 4,
-    fontSize: 13,
+    marginTop: 2,
   },
-  progressCircleContainer: {
-    width: 64,
-    height: 64,
-  },
-  progressCircleOuter: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    borderWidth: 4,
-    borderColor: "#E0F2F1",
+  progressCircle: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.lightText,
-    position: "relative",
-    overflow: "hidden",
-  },
-  progressCircleMask: {
-    position: "absolute",
-    width: "100%",
-    height: "100%",
-    borderWidth: 4,
-    borderColor: "transparent",
-    borderRadius: 32,
-    top: -4,
-    left: -4,
-  },
-  progressCircleInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.lightText,
-    zIndex: 1,
+    backgroundColor: colors.surfaceTeal,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
   },
   progressPercent: {
-    fontWeight: "700",
-    color: colors.primary,
-    fontSize: 16,
+    ...typography.h3,
+    color: colors.primaryDark,
   },
-  card: {
+  progressBarBg: {
+    height: 6,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.full,
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: radius.full,
+  },
+  timelineContainer: {
+    paddingTop: spacing.sm,
+  },
+  timelineItem: {
+    flexDirection: "row",
+    marginBottom: spacing.md,
+  },
+  timelineLeft: {
+    width: 60,
+    alignItems: "flex-end",
+    paddingRight: spacing.md,
+  },
+  timeText: {
+    ...typography.small,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    marginBottom: spacing.xs,
+  },
+  timelineLineContainer: {
+    alignItems: "center",
+    width: 20,
+    flex: 1,
+    marginRight: -10, // Align with dot center
+  },
+  timelineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.border,
+    marginBottom: 4,
+  },
+  timelineDotDone: {
+    backgroundColor: colors.success,
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: colors.borderLight,
+  },
+  timelineLineDone: {
+    backgroundColor: colors.success,
+    opacity: 0.3,
+  },
+  scheduleCard: {
+    flex: 1,
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
-    marginBottom: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: colors.borderLight,
     ...shadow.sm,
   },
-  timeRow: {
+  scheduleCardDone: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: "transparent",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  cardMain: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  timeText: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.textPrimary,
-  },
-  timeMeta: {
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-  medRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: spacing.md,
-    gap: spacing.sm,
+    flex: 1,
   },
   medIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: colors.lightGreen,
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceTeal,
     alignItems: "center",
     justifyContent: "center",
+    marginRight: spacing.md,
   },
-  medIconText: {
-    fontSize: 20,
-    color: colors.primary,
-    fontWeight: "700",
+  medIconDone: {
+    backgroundColor: colors.surfaceAlt,
   },
   medInfo: {
     flex: 1,
   },
   medName: {
-    fontWeight: "700",
+    ...typography.bodyMedium,
     color: colors.textPrimary,
-    fontSize: 16,
+    fontWeight: "600",
+  },
+  medNameDone: {
+    color: colors.textMuted,
+    textDecorationLine: "line-through",
   },
   medDose: {
+    ...typography.small,
     color: colors.textSecondary,
-    fontSize: 13,
-    marginTop: 2,
   },
   actionBtn: {
     backgroundColor: colors.primary,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.md,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 6,
-  },
-  actionDone: {
-    backgroundColor: colors.lightGreen,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
+    borderRadius: radius.full,
+    marginLeft: spacing.sm,
   },
   actionText: {
+    ...typography.caption,
     color: colors.lightText,
     fontWeight: "600",
-    fontSize: 14,
   },
-  actionTextDone: {
-    color: colors.success,
-  },
-  fab: {
+  fabContainer: {
     position: "absolute",
     right: spacing.lg,
     bottom: 100,
+  },
+  fab: {
     width: 56,
     height: 56,
     borderRadius: 28,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    ...shadow.card,
+    ...shadow.lg,
   },
 });

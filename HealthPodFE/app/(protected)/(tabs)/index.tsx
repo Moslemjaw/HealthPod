@@ -1,110 +1,231 @@
-import React from "react";
-import { StyleSheet, Text, View, ScrollView, SafeAreaView } from "react-native";
+import React, { useEffect, useState } from "react";
+import { StyleSheet, Text, View, ScrollView, SafeAreaView, Pressable, Dimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, radius, shadow, spacing } from "@/constants/design";
+import Animated, { FadeInDown, FadeInRight, FadeInUp } from "react-native-reanimated";
+import { colors, radius, shadow, spacing, gradients, typography } from "@/constants/design";
 import { useHealth } from "@/context/HealthContext";
+import { useRouter } from "expo-router";
+import { routes } from "@/constants/routes";
+import { getMedications, getSchedules } from "@/services/api";
+import { Medication, ScheduleItem } from "@/types";
+
+const { width } = Dimensions.get("window");
+
+const healthStats = [
+  { key: "heart", icon: "heart", label: "Heart Rate", unit: "bpm", color: colors.error, bg: colors.lightRed },
+  { key: "steps", icon: "footsteps", label: "Steps", unit: "steps", color: colors.accentOrange, bg: colors.surfaceOrange },
+  { key: "sleep", icon: "moon", label: "Sleep", unit: "hours", color: colors.accentPurple, bg: colors.surfacePurple },
+  { key: "water", icon: "water", label: "Hydration", unit: "glasses", color: colors.accentBlue, bg: colors.surfaceBlue },
+];
+
+const quickActions = [
+  { icon: "chatbubbles-outline", label: "AI Chat", color: colors.accentPurple, bg: colors.surfacePurple, route: "/(protected)/chat" },
+  { icon: "watch-outline", label: "Devices", color: colors.accentBlue, bg: colors.surfaceBlue, route: "/(protected)/device-selection" },
+  { icon: "medical-outline", label: "Meds", color: colors.primary, bg: colors.surfaceTeal, route: "/(protected)/(tabs)/inventory" },
+  { icon: "calendar-outline", label: "Schedule", color: colors.accentOrange, bg: colors.surfaceOrange, route: "/(protected)/(tabs)/schedule" },
+];
 
 export default function HomeScreen() {
-  const { user, health, medications } = useHealth();
+  const router = useRouter();
+  const { user, health, streak } = useHealth();
+  const [medications, setMedications] = useState<Medication[]>([]);
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const [nextMed, setNextMed] = useState<{ med: Medication; schedule: ScheduleItem } | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [medsData, scheduleData] = await Promise.all([
+          getMedications(),
+          getSchedules(),
+        ]);
+        setMedications(medsData);
+        setSchedules(scheduleData);
+        
+        // Find next upcoming medication
+        const now = new Date();
+        const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        
+        const upcoming = scheduleData
+          .filter(s => !s.isConfirmed && s.time >= currentTime)
+          .sort((a, b) => a.time.localeCompare(b.time))[0];
+        
+        if (upcoming) {
+          const med = medsData.find(m => m.id === upcoming.medicationId);
+          if (med) {
+            setNextMed({ med, schedule: upcoming });
+          }
+        } else {
+          // If no upcoming today, get first unconfirmed one
+          const firstUnconfirmed = scheduleData
+            .filter(s => !s.isConfirmed)
+            .sort((a, b) => a.time.localeCompare(b.time))[0];
+          if (firstUnconfirmed) {
+            const med = medsData.find(m => m.id === firstUnconfirmed.medicationId);
+            if (med) {
+              setNextMed({ med, schedule: firstUnconfirmed });
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching home data:", error);
+      }
+    };
+    
+    fetchData();
+  }, []);
+
+  const getStatValue = (key: string) => {
+    switch (key) {
+      case "heart": return health.heartRate;
+      case "steps": return health.steps.toLocaleString();
+      case "sleep": return health.sleepHours.toFixed(1);
+      case "water": return `${health.hydration}/8`;
+      default: return "—";
+    }
+  };
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#1A1F3A", "#1A1F3A"]} style={styles.header}>
-        <SafeAreaView>
-          <View style={styles.headerContent}>
-            <View>
-              <Text style={styles.greeting}>Good morning,</Text>
-              <Text style={styles.name}>{user?.name || "Apple User"} 👋</Text>
-            </View>
-            <View style={styles.bell}>
-              <Ionicons name="notifications-outline" size={22} color={colors.lightText} />
-              <View style={styles.dot} />
-            </View>
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <Animated.View 
+          entering={FadeInDown.duration(600)} 
+          style={styles.header}
+        >
+          <View style={styles.headerLeft}>
+            <Text style={styles.greeting}>Good morning,</Text>
+            <Text style={styles.name}>{user?.name || "Friend"}</Text>
           </View>
-        </SafeAreaView>
-      </LinearGradient>
+          <Pressable 
+            style={styles.notificationBtn}
+            onPress={() => router.push("/(protected)/notifications")}
+          >
+            <Ionicons name="notifications-outline" size={24} color={colors.textPrimary} />
+            <View style={styles.notificationDot} />
+          </Pressable>
+        </Animated.View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        <LinearGradient colors={["#00B894", "#00D4AA"]} style={styles.streakCard}>
-          <View style={styles.streakIcon}>
-            <Ionicons name="flame" size={20} color={colors.warning} />
-          </View>
-          <View style={styles.streakContent}>
-            <Text style={styles.streakTitle}>6 Day Streak!</Text>
-            <Text style={styles.streakSub}>Keep it up! You&apos;re doing great.</Text>
-            <View style={styles.streakBar}>
-              <View style={styles.streakFill} />
-            </View>
-            <Text style={styles.streakMeta}>245 / 300 XP to Level 4</Text>
-          </View>
-        </LinearGradient>
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Streak Card */}
+          <Animated.View 
+            entering={FadeInUp.delay(100).duration(600).springify()} 
+            style={styles.streakWrapper}
+          >
+            <LinearGradient
+              colors={gradients.primary}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.streakCard}
+            >
+              <View style={styles.streakLeft}>
+                <View style={styles.streakIconBox}>
+                  <Ionicons name="flame" size={24} color={colors.warning} />
+                </View>
+                <View>
+                  <Text style={styles.streakTitle}>{streak.currentStreak} Day Streak!</Text>
+                  <Text style={styles.streakSub}>
+                    {streak.currentStreak > 0 ? "You're on fire!" : "Start your streak today"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.streakRight}>
+                <Text style={styles.streakXP}>{streak.totalXP} XP</Text>
+                <Text style={styles.streakLevel}>Lvl {streak.level}</Text>
+              </View>
+            </LinearGradient>
+          </Animated.View>
 
-        <View style={styles.quickRow}>
-          <View style={styles.quickCard}>
-            <Text style={styles.quickIcon}>💬</Text>
-            <Text style={styles.quickText}>AI Chat</Text>
+          {/* Quick Actions */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.quickGrid}>
+              {quickActions.map((action, i) => (
+                <Animated.View
+                  key={action.label}
+                  entering={FadeInRight.delay(200 + i * 50).duration(400)}
+                >
+                  <Pressable 
+                    style={styles.quickCard}
+                    onPress={() => action.route && router.push(action.route as any)}
+                  >
+                    <View style={[styles.quickIcon, { backgroundColor: action.bg }]}>
+                      <Ionicons name={action.icon as any} size={24} color={action.color} />
+                    </View>
+                    <Text style={styles.quickLabel}>{action.label}</Text>
+                  </Pressable>
+                </Animated.View>
+              ))}
+            </View>
           </View>
-          <View style={styles.quickCard}>
-            <Text style={styles.quickIcon}>⌚</Text>
-            <Text style={styles.quickText}>Devices</Text>
-          </View>
-        </View>
 
-        <Text style={styles.sectionTitle}>Today&apos;s Health</Text>
-        <View style={styles.statGrid}>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Text style={styles.statIcon}>❤️</Text>
+          {/* Today's Health */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Today's Health</Text>
+            <View style={styles.statsGrid}>
+              {healthStats.map((stat, i) => (
+                <Animated.View
+                  key={stat.key}
+                  entering={FadeInUp.delay(300 + i * 100).duration(500)}
+                  style={styles.statCard}
+                >
+                  <View style={styles.statHeader}>
+                    <View style={[styles.statIconBox, { backgroundColor: stat.bg }]}>
+                      <Ionicons name={stat.icon as any} size={18} color={stat.color} />
+                    </View>
+                    <Text style={styles.statLabel}>{stat.label}</Text>
+                  </View>
+                  <View style={styles.statContent}>
+                    <Text style={styles.statValue}>{getStatValue(stat.key)}</Text>
+                    <Text style={styles.statUnit}>{stat.unit}</Text>
+                  </View>
+                </Animated.View>
+              ))}
             </View>
-            <Text style={styles.statLabel}>Heart Rate</Text>
-            <Text style={styles.statValue}>{health.heartRate}</Text>
-            <Text style={styles.statUnit}>bpm</Text>
           </View>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Text style={styles.statIcon}>👣</Text>
-            </View>
-            <Text style={styles.statLabel}>Steps</Text>
-            <Text style={styles.statValue}>{health.steps.toLocaleString()}</Text>
-            <Text style={styles.statUnit}>/ 10,000</Text>
-          </View>
-        </View>
-        <View style={styles.statGrid}>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Text style={styles.statIcon}>🌙</Text>
-            </View>
-            <Text style={styles.statLabel}>Sleep</Text>
-            <Text style={styles.statValue}>{health.sleepHours.toFixed(1)}</Text>
-            <Text style={styles.statUnit}>hours</Text>
-          </View>
-          <View style={styles.statCard}>
-            <View style={styles.statIconContainer}>
-              <Text style={styles.statIcon}>💧</Text>
-            </View>
-            <Text style={styles.statLabel}>Hydration</Text>
-            <Text style={styles.statValue}>{health.hydration}</Text>
-            <Text style={styles.statUnit}>/ 8 glasses</Text>
-          </View>
-        </View>
 
-        <Text style={styles.sectionTitle}>Next Reminder</Text>
-        <View style={styles.reminderCard}>
-          <View style={styles.reminderIcon}>
-            <Text style={styles.reminderIconText}>⏰</Text>
-          </View>
-          <View style={styles.reminderInfo}>
-            <Text style={styles.reminderTime}>8:00 AM</Text>
-            <Text style={styles.reminderMed}>
-              {medications[0]?.name || "Metformin"} {medications[0]?.dosage || "500mg"}
-            </Text>
-          </View>
-          <View style={styles.reminderPill}>
-            <Text style={styles.reminderPillText}>In 2 hours</Text>
-          </View>
-        </View>
-      </ScrollView>
+          {/* Next Reminder */}
+          {nextMed && (
+            <Animated.View 
+              entering={FadeInUp.delay(500).duration(600)} 
+              style={styles.section}
+            >
+              <Text style={styles.sectionTitle}>Up Next</Text>
+              <View style={styles.reminderCard}>
+                <View style={styles.reminderHeader}>
+                  <View style={styles.timeBadge}>
+                    <Ionicons name="time-outline" size={16} color={colors.primaryDark} />
+                    <Text style={styles.timeText}>{nextMed.schedule.time}</Text>
+                  </View>
+                  <View style={[styles.statusBadge, { backgroundColor: colors.surfaceTeal }]}>
+                    <Text style={[styles.statusText, { color: colors.primaryDark }]}>Upcoming</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.reminderContent}>
+                  <View style={styles.medIconBox}>
+                    <Ionicons name="medical" size={24} color={colors.primary} />
+                  </View>
+                  <View style={styles.medInfo}>
+                    <Text style={styles.medName}>{nextMed.med.name}</Text>
+                    <Text style={styles.medDose}>{nextMed.med.dosage} • Take with food</Text>
+                  </View>
+                  <Pressable style={styles.checkBtn}>
+                    <Ionicons name="checkmark" size={20} color={colors.lightText} />
+                  </Pressable>
+                </View>
+              </View>
+            </Animated.View>
+          )}
+
+          {/* Bottom Padding for Tab Bar */}
+          <View style={{ height: 100 }} />
+        </ScrollView>
+      </SafeAreaView>
     </View>
   );
 }
@@ -114,37 +235,40 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingTop: 0,
-    paddingBottom: spacing.lg,
+  safeArea: {
+    flex: 1,
   },
-  headerContent: {
+  header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  headerLeft: {
+    gap: 2,
   },
   greeting: {
-    color: "#CBD5E1",
-    fontSize: 14,
+    ...typography.body,
+    color: colors.textSecondary,
+    fontSize: 16,
   },
   name: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: colors.lightText,
-    marginTop: 2,
+    ...typography.h2,
+    color: colors.textPrimary,
   },
-  bell: {
+  notificationBtn: {
     width: 44,
     height: 44,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: radius.full,
+    backgroundColor: colors.card,
     alignItems: "center",
     justifyContent: "center",
-    position: "relative",
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    ...shadow.sm,
   },
-  dot: {
+  notificationDot: {
     position: "absolute",
     top: 10,
     right: 12,
@@ -152,165 +276,212 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.error,
+    borderWidth: 1.5,
+    borderColor: colors.card,
   },
-  scroll: {
-    flex: 1,
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
   },
-  content: {
-    padding: spacing.lg,
+  streakWrapper: {
+    marginBottom: spacing.lg,
   },
   streakCard: {
     flexDirection: "row",
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    gap: spacing.md,
-    marginBottom: spacing.lg,
+    justifyContent: "space-between",
     alignItems: "center",
+    borderRadius: radius.xl,
+    padding: spacing.md,
+    ...shadow.glow,
   },
-  streakIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+  streakLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  streakIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.lg,
     backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
   },
-  streakContent: {
-    flex: 1,
-  },
   streakTitle: {
+    ...typography.h3,
     color: colors.lightText,
-    fontWeight: "700",
-    fontSize: 16,
+    fontSize: 18,
   },
   streakSub: {
+    ...typography.small,
     color: colors.lightText,
     opacity: 0.9,
-    marginTop: 2,
-    fontSize: 13,
   },
-  streakBar: {
-    height: 6,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    borderRadius: 999,
-    marginTop: spacing.sm,
+  streakRight: {
+    alignItems: "flex-end",
+    gap: 4,
   },
-  streakFill: {
-    width: "82%",
-    height: "100%",
-    borderRadius: 999,
-    backgroundColor: colors.warning,
-  },
-  streakMeta: {
+  streakXP: {
+    ...typography.h3,
     color: colors.lightText,
-    opacity: 0.9,
-    fontSize: 12,
-    marginTop: spacing.xs,
-  },
-  quickRow: {
-    flexDirection: "row",
-    gap: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  quickCard: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    paddingVertical: spacing.md,
-    alignItems: "center",
-    ...shadow.sm,
-  },
-  quickIcon: {
-    fontSize: 24,
-  },
-  quickText: {
-    marginTop: spacing.xs,
-    fontWeight: "600",
-    color: colors.textPrimary,
-    fontSize: 14,
-  },
-  statIconContainer: {
-    marginBottom: spacing.xs,
-  },
-  statIcon: {
     fontSize: 20,
   },
+  streakLevel: {
+    ...typography.caption,
+    color: colors.lightText,
+    opacity: 0.8,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    overflow: "hidden",
+  },
+  section: {
+    marginBottom: spacing.xl,
+  },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    ...typography.h3,
     color: colors.textPrimary,
     marginBottom: spacing.md,
   },
-  statGrid: {
+  quickGrid: {
     flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  quickCard: {
+    alignItems: "center",
+    gap: spacing.xs,
+    width: (width - spacing.lg * 2) / 4,
+  },
+  quickIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.xl,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    textAlign: "center",
+  },
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: spacing.md,
-    marginBottom: spacing.md,
   },
   statCard: {
-    flex: 1,
+    width: (width - spacing.lg * 2 - spacing.md) / 2,
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
     ...shadow.sm,
   },
-  statLabel: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    marginTop: spacing.xs,
-  },
-  statValue: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: colors.textPrimary,
-    marginTop: spacing.xs,
-  },
-  statUnit: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  reminderCard: {
+  statHeader: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.lightGreen,
-    borderRadius: radius.lg,
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  statIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statLabel: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    flex: 1,
+  },
+  statContent: {
+    alignItems: "baseline",
+    flexDirection: "row",
+    gap: 4,
+  },
+  statValue: {
+    ...typography.h2,
+    color: colors.textPrimary,
+    fontSize: 24,
+  },
+  statUnit: {
+    ...typography.tiny,
+    color: colors.textMuted,
+    marginBottom: 4,
+  },
+  reminderCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
     padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
     ...shadow.sm,
   },
-  reminderIcon: {
+  reminderHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.md,
+  },
+  timeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.surfaceAlt,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+  },
+  timeText: {
+    ...typography.caption,
+    color: colors.textPrimary,
+    fontWeight: "600",
+  },
+  statusBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+  },
+  statusText: {
+    ...typography.tiny,
+    fontWeight: "700",
+  },
+  reminderContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  medIconBox: {
+    width: 50,
+    height: 50,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceTeal,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  medInfo: {
+    flex: 1,
+  },
+  medName: {
+    ...typography.h3,
+    fontSize: 16,
+    color: colors.textPrimary,
+  },
+  medDose: {
+    ...typography.small,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  checkBtn: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: radius.full,
     backgroundColor: colors.success,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: spacing.md,
-  },
-  reminderInfo: {
-    flex: 1,
-  },
-  reminderTime: {
-    fontWeight: "700",
-    color: colors.textPrimary,
-    fontSize: 16,
-  },
-  reminderMed: {
-    color: colors.textSecondary,
-    marginTop: 2,
-    fontSize: 14,
-  },
-  reminderIconText: {
-    fontSize: 18,
-  },
-  reminderPill: {
-    backgroundColor: colors.success,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  reminderPillText: {
-    color: colors.lightText,
-    fontWeight: "600",
-    fontSize: 11,
+    ...shadow.sm,
   },
 });

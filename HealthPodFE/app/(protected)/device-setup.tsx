@@ -1,10 +1,11 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View, ScrollView, SafeAreaView } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, TextInput, View, ScrollView, SafeAreaView } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
 import { PrimaryButton } from "@/components/PrimaryButton";
-import { colors, radius, shadow, spacing } from "@/constants/design";
+import { colors, radius, shadow, spacing, gradients, typography } from "@/constants/design";
 import { routes } from "@/constants/routes";
 import { useHealth } from "@/context/HealthContext";
 import { createDevice } from "@/services/api";
@@ -14,6 +15,8 @@ type MedicationInput = {
   dosage: string;
   schedule: string;
 };
+
+const cartridgeColors = [colors.primary, colors.accentPurple, colors.accentBlue];
 
 export default function DeviceSetupScreen() {
   const router = useRouter();
@@ -65,29 +68,53 @@ export default function DeviceSetupScreen() {
 
     updateProfile({ deviceSetupComplete: true });
     Alert.alert("Setup Complete", "Your HealthPod dispenser is ready!", [
-      { text: "OK", onPress: () => router.replace(routes.tabs) },
+      { text: "Let's Go!", onPress: () => router.replace(routes.tabs) },
     ]);
   };
 
   if (step === "serial") {
     return (
       <View style={styles.container}>
-        <LinearGradient colors={["#1A1F3A", "#1A1F3A"]} style={styles.header}>
+        <LinearGradient colors={gradients.dark} style={styles.header}>
           <SafeAreaView>
-            <View style={styles.headerContent}>
-              <Text style={styles.title}>Enter Serial Number</Text>
-              <Text style={styles.subtitle}>Find the serial number on your HealthPod dispenser</Text>
-            </View>
+            <Animated.View 
+              entering={FadeInDown.duration(500)} 
+              style={styles.headerContent}
+            >
+              <View style={styles.progressRow}>
+                <View style={[styles.progressDot, styles.progressDotDone]} />
+                <View style={[styles.progressLine, styles.progressLineDone]} />
+                <View style={[styles.progressDot, styles.progressDotDone]} />
+                <View style={[styles.progressLine, styles.progressLineDone]} />
+                <View style={[styles.progressDot, styles.progressDotActive]} />
+              </View>
+              <Text style={styles.stepLabel}>Step 3 of 3</Text>
+              <Text style={styles.title}>Connect Device</Text>
+              <Text style={styles.subtitle}>Enter the serial number from your dispenser</Text>
+            </Animated.View>
           </SafeAreaView>
         </LinearGradient>
 
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-          <View style={styles.card}>
-            <Text style={styles.label}>Serial Number *</Text>
+        <Animated.View 
+          entering={FadeInUp.delay(200).duration(500).springify()} 
+          style={styles.card}
+        >
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {/* Device Illustration */}
+            <View style={styles.deviceIllustration}>
+              <View style={styles.deviceBox}>
+                <Ionicons name="cube" size={48} color={colors.primary} />
+              </View>
+              <Text style={styles.deviceLabel}>HealthPod Dispenser</Text>
+            </View>
+
+            <Text style={styles.label}>Serial Number</Text>
             <View style={styles.inputContainer}>
-              <Ionicons name="barcode-outline" size={18} color={colors.textSecondary} style={styles.inputIcon} />
+              <View style={styles.inputIconBox}>
+                <Ionicons name="barcode-outline" size={20} color={colors.textMuted} />
+              </View>
               <TextInput
-                placeholder="HPD-2026-001"
+                placeholder="HPD-2026-XXXXX"
                 value={serialNumber}
                 onChangeText={setSerialNumber}
                 style={styles.input}
@@ -96,94 +123,124 @@ export default function DeviceSetupScreen() {
               />
             </View>
 
-            <PrimaryButton
-              title="Continue"
-              onPress={handleSerialSubmit}
-            />
-          </View>
-        </ScrollView>
+            <View style={styles.helpCard}>
+              <Ionicons name="help-circle" size={20} color={colors.accentBlue} />
+              <Text style={styles.helpText}>
+                Find the serial number on the bottom of your device or on the packaging
+              </Text>
+            </View>
+
+            <View style={styles.actions}>
+              <PrimaryButton 
+                title={loading ? "Connecting..." : "Connect Device"} 
+                size="lg" 
+                onPress={handleSerialSubmit}
+                disabled={loading}
+              />
+            </View>
+          </ScrollView>
+        </Animated.View>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={["#1A1F3A", "#1A1F3A"]} style={styles.header}>
+      <LinearGradient colors={gradients.dark} style={styles.header}>
         <SafeAreaView>
-          <View style={styles.headerContent}>
-            <Text style={styles.title}>Add Medications</Text>
-            <Text style={styles.subtitle}>Configure medications for cartridges C1, C2, and C3</Text>
-          </View>
+          <Animated.View 
+            entering={FadeInDown.duration(500)} 
+            style={styles.headerContent}
+          >
+            <View style={styles.successIcon}>
+              <Ionicons name="checkmark-circle" size={32} color={colors.success} />
+            </View>
+            <Text style={styles.title}>Device Connected!</Text>
+            <Text style={styles.subtitle}>Now add your medications to the cartridges</Text>
+          </Animated.View>
         </SafeAreaView>
       </LinearGradient>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        <View style={styles.card}>
+      <Animated.View 
+        entering={FadeInUp.delay(200).duration(500).springify()} 
+        style={styles.card}
+      >
+        <ScrollView showsVerticalScrollIndicator={false}>
           {medications.map((med, index) => (
-            <View key={index} style={styles.medicationCard}>
+            <Animated.View 
+              key={index}
+              entering={FadeInDown.delay(300 + index * 100).duration(400)}
+              style={styles.cartridgeCard}
+            >
               <View style={styles.cartridgeHeader}>
-                <View style={styles.cartridgeBadge}>
-                  <Text style={styles.cartridgeText}>C{index + 1}</Text>
+                <View style={[styles.cartridgeBadge, { backgroundColor: cartridgeColors[index] }]}>
+                  <Text style={styles.cartridgeNumber}>C{index + 1}</Text>
                 </View>
-                <Text style={styles.cartridgeLabel}>Cartridge {index + 1}</Text>
+                <Text style={styles.cartridgeTitle}>Cartridge {index + 1}</Text>
+                {med.name.trim() && (
+                  <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                )}
               </View>
 
-              <Text style={styles.label}>Medication Name *</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons name="medical-outline" size={18} color={colors.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  placeholder="e.g., Metformin"
-                  value={med.name}
-                  onChangeText={(text) => {
-                    const updated = [...medications];
-                    updated[index].name = text;
-                    setMedications(updated);
-                  }}
-                  style={styles.input}
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
+              <View style={styles.cartridgeInputs}>
+                <View style={styles.inputRow}>
+                  <View style={[styles.inputContainer, styles.inputFlex]}>
+                    <TextInput
+                      placeholder="Medication name"
+                      value={med.name}
+                      onChangeText={(text) => {
+                        const updated = [...medications];
+                        updated[index].name = text;
+                        setMedications(updated);
+                      }}
+                      style={styles.inputSmall}
+                      placeholderTextColor={colors.textMuted}
+                    />
+                  </View>
+                  <View style={[styles.inputContainer, { width: 100 }]}>
+                    <TextInput
+                      placeholder="Dosage"
+                      value={med.dosage}
+                      onChangeText={(text) => {
+                        const updated = [...medications];
+                        updated[index].dosage = text;
+                        setMedications(updated);
+                      }}
+                      style={styles.inputSmall}
+                      placeholderTextColor={colors.textMuted}
+                    />
+                  </View>
+                </View>
 
-              <Text style={styles.label}>Dosage *</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons name="flask-outline" size={18} color={colors.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  placeholder="e.g., 500mg"
-                  value={med.dosage}
-                  onChangeText={(text) => {
-                    const updated = [...medications];
-                    updated[index].dosage = text;
-                    setMedications(updated);
-                  }}
-                  style={styles.input}
-                  placeholderTextColor={colors.textMuted}
-                />
+                <View style={styles.inputContainer}>
+                  <View style={styles.inputIconBox}>
+                    <Ionicons name="time-outline" size={18} color={colors.textMuted} />
+                  </View>
+                  <TextInput
+                    placeholder="Schedule (e.g., 8:00 AM • Daily)"
+                    value={med.schedule}
+                    onChangeText={(text) => {
+                      const updated = [...medications];
+                      updated[index].schedule = text;
+                      setMedications(updated);
+                    }}
+                    style={styles.input}
+                    placeholderTextColor={colors.textMuted}
+                  />
+                </View>
               </View>
-
-              <Text style={styles.label}>Schedule (Optional)</Text>
-              <View style={styles.inputContainer}>
-                <Ionicons name="time-outline" size={18} color={colors.textSecondary} style={styles.inputIcon} />
-                <TextInput
-                  placeholder="e.g., 8:00 AM • Daily"
-                  value={med.schedule}
-                  onChangeText={(text) => {
-                    const updated = [...medications];
-                    updated[index].schedule = text;
-                    setMedications(updated);
-                  }}
-                  style={styles.input}
-                  placeholderTextColor={colors.textMuted}
-                />
-              </View>
-            </View>
+            </Animated.View>
           ))}
 
-          <PrimaryButton
-            title="Complete Setup"
-            onPress={handleMedicationsSubmit}
-          />
-        </View>
-      </ScrollView>
+          <View style={styles.actions}>
+            <PrimaryButton
+              title="Complete Setup"
+              size="lg"
+              onPress={handleMedicationsSubmit}
+            />
+          </View>
+        </ScrollView>
+      </Animated.View>
     </View>
   );
 }
@@ -194,92 +251,170 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    paddingTop: 60,
-    paddingBottom: spacing.xl,
+    paddingTop: spacing.xxxl,
+    paddingBottom: spacing.xxl,
     paddingHorizontal: spacing.lg,
   },
   headerContent: {
     alignItems: "center",
   },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: colors.lightText,
-    marginTop: spacing.sm,
+  progressRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.md,
   },
-  subtitle: {
-    marginTop: 6,
-    color: "#CBD5E1",
-    fontSize: 14,
+  progressDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "rgba(255,255,255,0.3)",
+  },
+  progressDotActive: {
+    backgroundColor: colors.primary,
+  },
+  progressDotDone: {
+    backgroundColor: colors.success,
+  },
+  progressLine: {
+    width: 40,
+    height: 3,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    marginHorizontal: spacing.xs,
+  },
+  progressLineDone: {
+    backgroundColor: colors.success,
+  },
+  stepLabel: {
+    ...typography.caption,
+    color: colors.primary,
+    marginBottom: spacing.xs,
+  },
+  successIcon: {
+    marginBottom: spacing.sm,
+  },
+  title: {
+    ...typography.h1,
+    color: colors.lightText,
     textAlign: "center",
   },
-  scroll: {
-    flex: 1,
-  },
-  content: {
-    padding: spacing.lg,
+  subtitle: {
+    ...typography.body,
+    color: colors.textLight,
+    opacity: 0.8,
+    marginTop: spacing.xs,
+    textAlign: "center",
   },
   card: {
-    marginTop: -30,
+    flex: 1,
+    marginTop: -spacing.xl,
     backgroundColor: colors.card,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    paddingTop: spacing.xl,
-    ...shadow.card,
+    borderTopLeftRadius: radius.xxl,
+    borderTopRightRadius: radius.xxl,
+    padding: spacing.xl,
+    ...shadow.lg,
+  },
+  deviceIllustration: {
+    alignItems: "center",
+    marginBottom: spacing.xl,
+  },
+  deviceBox: {
+    width: 100,
+    height: 100,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surfaceTeal,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.sm,
+  },
+  deviceLabel: {
+    ...typography.bodyMedium,
+    color: colors.textSecondary,
   },
   label: {
+    ...typography.small,
     fontWeight: "600",
-    marginBottom: spacing.xs,
-    marginTop: spacing.md,
-    color: colors.textPrimary,
-    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
   },
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
+    borderColor: colors.borderLight,
     marginBottom: spacing.md,
   },
-  inputIcon: {
-    marginRight: spacing.xs,
+  inputIconBox: {
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
   },
   input: {
     flex: 1,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingRight: spacing.md,
     color: colors.textPrimary,
     fontSize: 16,
   },
-  medicationCard: {
+  inputSmall: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    color: colors.textPrimary,
+    fontSize: 15,
+  },
+  inputFlex: {
+    flex: 1,
+    marginRight: spacing.sm,
+  },
+  inputRow: {
+    flexDirection: "row",
+    marginBottom: spacing.sm,
+  },
+  helpCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceBlue,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  helpText: {
+    flex: 1,
+    ...typography.small,
+    color: colors.accentBlue,
+  },
+  cartridgeCard: {
     backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     padding: spacing.md,
     marginBottom: spacing.md,
   },
   cartridgeHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   cartridgeBadge: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.sm,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.sm,
     marginRight: spacing.sm,
   },
-  cartridgeText: {
-    color: colors.lightText,
+  cartridgeNumber: {
+    ...typography.caption,
     fontWeight: "700",
-    fontSize: 12,
+    color: colors.lightText,
   },
-  cartridgeLabel: {
-    fontSize: 14,
-    fontWeight: "600",
+  cartridgeTitle: {
+    ...typography.bodyMedium,
     color: colors.textPrimary,
+    flex: 1,
+  },
+  cartridgeInputs: {},
+  actions: {
+    marginTop: spacing.lg,
+    paddingBottom: spacing.xl,
   },
 });
-

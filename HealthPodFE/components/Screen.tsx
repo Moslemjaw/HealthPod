@@ -33,7 +33,8 @@ const styles = StyleSheet.create({
     padding: spacing.lg
   },
   scroll: {
-    padding: spacing.lg
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl
   }
 });
 

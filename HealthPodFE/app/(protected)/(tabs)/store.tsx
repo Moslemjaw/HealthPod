@@ -1,89 +1,139 @@
 import React from "react";
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, Pressable } from "react-native";
+import { StyleSheet, Text, View, ScrollView, SafeAreaView, Pressable, Dimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors, radius, shadow, spacing } from "@/constants/design";
+import { LinearGradient } from "expo-linear-gradient";
+import Animated, { FadeInDown, FadeInRight, FadeInUp } from "react-native-reanimated";
+import { colors, radius, shadow, spacing, gradients, typography } from "@/constants/design";
+
+const { width } = Dimensions.get("window");
 
 const recommended = [
-  { id: "1", name: "Pill Organizer", price: "$12.99", icon: "grid-outline", available: false },
-  { id: "2", name: "Extra Cartridges", price: "$24.99", icon: "layers-outline", available: true },
-  { id: "3", name: "Travel Case", price: "$19.99", icon: "briefcase-outline", available: true },
+  { id: "1", name: "Pill Organizer", price: "$12.99", icon: "grid-outline", color: colors.accentPurple, bg: colors.surfacePurple },
+  { id: "2", name: "Extra Cartridges", price: "$24.99", icon: "layers-outline", color: colors.primary, bg: colors.surfaceTeal },
+  { id: "3", name: "Travel Case", price: "$19.99", icon: "briefcase-outline", color: colors.accentBlue, bg: colors.surfaceBlue },
+  { id: "4", name: "Cleaning Kit", price: "$9.99", icon: "sparkles-outline", color: colors.accentOrange, bg: colors.surfaceOrange },
 ];
 
 const orders = [
-  { id: "o1", name: "Metformin Cartridge Pack", date: "Placed on 2026-01-16", status: "Processing" },
-  { id: "o2", name: "Vitamin D Refill Pack", date: "Placed on 2026-01-08", status: "Shipped" },
+  { id: "o1", name: "Metformin Cartridge Pack", date: "Jan 16, 2026", status: "Processing", icon: "cube" },
+  { id: "o2", name: "Vitamin D Refill Pack", date: "Jan 8, 2026", status: "Shipped", icon: "airplane" },
 ];
 
 export default function StoreScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Store</Text>
-          <Text style={styles.subtitle}>Refills and accessories</Text>
+        <ScrollView 
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <Animated.View entering={FadeInDown.duration(500)}>
+            <Text style={styles.title}>Store</Text>
+            <Text style={styles.subtitle}>Refills and accessories</Text>
+          </Animated.View>
 
-          <View style={styles.autoRefillBanner}>
-            <View style={styles.autoRefillContent}>
-              <Text style={styles.autoRefillTitle}>Auto-Refill Enabled</Text>
-              <Text style={styles.autoRefillSub}>Never run out of your medications.</Text>
-            </View>
-            <Ionicons name="refresh" size={24} color={colors.lightText} />
-          </View>
-
-          <Text style={styles.sectionTitle}>Recommended for You</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recommendedScroll}>
-            {recommended.map((item) => (
-              <View key={item.id} style={styles.recommendedCard}>
-                <View style={[styles.recommendedIcon, !item.available && styles.recommendedIconDisabled]}>
-                  <Ionicons
-                    name={item.icon as any}
-                    size={24}
-                    color={item.available ? colors.primary : colors.textMuted}
-                  />
+          {/* Auto-Refill Banner */}
+          <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+            <LinearGradient
+              colors={gradients.primary}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.banner}
+            >
+              <View style={styles.bannerContent}>
+                <View style={styles.bannerIconBox}>
+                  <Ionicons name="sync" size={24} color={colors.lightText} />
                 </View>
-                <Text style={[styles.recommendedName, !item.available && styles.recommendedNameDisabled]}>
-                  {item.name}
-                </Text>
-                <Text style={[styles.recommendedPrice, !item.available && styles.recommendedPriceDisabled]}>
-                  {item.price}
-                </Text>
+                <View style={styles.bannerText}>
+                  <Text style={styles.bannerTitle}>Auto-Refill Active</Text>
+                  <Text style={styles.bannerSub}>Your meds refill automatically</Text>
+                </View>
               </View>
+              <Pressable style={styles.bannerBtn}>
+                <Text style={styles.bannerBtnText}>Manage</Text>
+              </Pressable>
+            </LinearGradient>
+          </Animated.View>
+
+          {/* Recommended Products */}
+          <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recommended</Text>
+              <Pressable>
+                <Text style={styles.seeAll}>See all</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.productsScroll}
+          >
+            {recommended.map((item, i) => (
+              <Animated.View
+                key={item.id}
+                entering={FadeInRight.delay(300 + i * 80).duration(400)}
+              >
+                <Pressable style={styles.productCard}>
+                  <View style={[styles.productIcon, { backgroundColor: item.bg }]}>
+                    <Ionicons name={item.icon as any} size={28} color={item.color} />
+                  </View>
+                  <Text style={styles.productName}>{item.name}</Text>
+                  <Text style={styles.productPrice}>{item.price}</Text>
+                  <Pressable style={styles.addBtn}>
+                    <Ionicons name="add" size={18} color={colors.lightText} />
+                  </Pressable>
+                </Pressable>
+              </Animated.View>
             ))}
           </ScrollView>
 
-          <Text style={styles.sectionTitle}>Recent Orders</Text>
-          {orders.map((order) => (
-            <View key={order.id} style={styles.orderCard}>
-              <View style={styles.orderIcon}>
-                <Ionicons name="cube-outline" size={20} color={colors.primary} />
-              </View>
-              <View style={styles.orderInfo}>
-                <Text style={styles.orderName}>{order.name}</Text>
-                <Text style={styles.orderDate}>{order.date}</Text>
-                <View
-                  style={[
-                    styles.orderStatus,
-                    order.status === "Processing" ? styles.statusWarning : styles.statusSuccess,
-                  ]}
-                >
-                  <Ionicons
-                    name={order.status === "Processing" ? "time-outline" : "airplane-outline"}
-                    size={12}
+          {/* Recent Orders */}
+          <Animated.View entering={FadeInUp.delay(400).duration(500)}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Orders</Text>
+              <Pressable>
+                <Text style={styles.seeAll}>View all</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+
+          {orders.map((order, i) => (
+            <Animated.View
+              key={order.id}
+              entering={FadeInUp.delay(500 + i * 100).duration(400)}
+            >
+              <Pressable style={styles.orderCard}>
+                <View style={styles.orderIcon}>
+                  <Ionicons name="cube-outline" size={24} color={colors.primary} />
+                </View>
+                <View style={styles.orderInfo}>
+                  <Text style={styles.orderName}>{order.name}</Text>
+                  <Text style={styles.orderDate}>{order.date}</Text>
+                </View>
+                <View style={[
+                  styles.statusBadge,
+                  order.status === "Processing" ? styles.statusProcessing : styles.statusShipped
+                ]}>
+                  <Ionicons 
+                    name={order.status === "Processing" ? "time-outline" : "airplane-outline"} 
+                    size={14} 
                     color={order.status === "Processing" ? colors.warning : colors.accentBlue}
                   />
-                  <Text
-                    style={[
-                      styles.orderStatusText,
-                      order.status === "Processing" ? styles.statusWarningText : styles.statusSuccessText,
-                    ]}
-                  >
+                  <Text style={[
+                    styles.statusText,
+                    order.status === "Processing" ? styles.statusTextProcessing : styles.statusTextShipped
+                  ]}>
                     {order.status}
                   </Text>
                 </View>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-            </View>
+              </Pressable>
+            </Animated.View>
           ))}
+
+          <View style={{ height: 100 }} />
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -100,90 +150,117 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: spacing.lg,
+    paddingTop: spacing.xl,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
+    ...typography.h1,
     color: colors.textPrimary,
-    marginBottom: 4,
+    marginBottom: spacing.xxs,
   },
   subtitle: {
+    ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
-    fontSize: 14,
   },
-  autoRefillBanner: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.lg,
+  banner: {
+    borderRadius: radius.xl,
     padding: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xl,
+    ...shadow.md,
+  },
+  bannerContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  bannerIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bannerText: {},
+  bannerTitle: {
+    ...typography.bodyMedium,
+    color: colors.lightText,
+  },
+  bannerSub: {
+    ...typography.small,
+    color: colors.lightText,
+    opacity: 0.85,
+    marginTop: 2,
+  },
+  bannerBtn: {
+    backgroundColor: "rgba(255,255,255,0.2)",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+  },
+  bannerBtnText: {
+    ...typography.small,
+    fontWeight: "600",
+    color: colors.lightText,
+  },
+  sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: spacing.xl,
-    ...shadow.sm,
-  },
-  autoRefillContent: {
-    flex: 1,
-  },
-  autoRefillTitle: {
-    color: colors.lightText,
-    fontWeight: "700",
-    fontSize: 16,
-    marginBottom: 4,
-  },
-  autoRefillSub: {
-    color: colors.lightText,
-    opacity: 0.9,
-    fontSize: 13,
+    marginBottom: spacing.md,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    ...typography.h3,
     color: colors.textPrimary,
-    marginBottom: spacing.md,
-    marginTop: spacing.lg,
   },
-  recommendedScroll: {
-    marginBottom: spacing.lg,
+  seeAll: {
+    ...typography.small,
+    color: colors.primary,
+    fontWeight: "600",
   },
-  recommendedCard: {
+  productsScroll: {
+    paddingRight: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  productCard: {
     width: 140,
     backgroundColor: colors.card,
-    borderRadius: radius.lg,
+    borderRadius: radius.xl,
     padding: spacing.md,
-    alignItems: "center",
     marginRight: spacing.md,
+    alignItems: "center",
     ...shadow.sm,
   },
-  recommendedIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceTeal,
+  productIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.lg,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: spacing.sm,
   },
-  recommendedIconDisabled: {
-    backgroundColor: colors.surfaceAlt,
-  },
-  recommendedName: {
-    textAlign: "center",
+  productName: {
+    ...typography.small,
     fontWeight: "600",
     color: colors.textPrimary,
-    fontSize: 14,
-    marginBottom: 4,
+    textAlign: "center",
+    marginBottom: spacing.xxs,
   },
-  recommendedNameDisabled: {
-    color: colors.textMuted,
-  },
-  recommendedPrice: {
+  productPrice: {
+    ...typography.bodyMedium,
     color: colors.primary,
-    fontWeight: "700",
-    fontSize: 14,
+    marginBottom: spacing.sm,
   },
-  recommendedPriceDisabled: {
-    color: colors.textMuted,
+  addBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
   },
   orderCard: {
     flexDirection: "row",
@@ -195,51 +272,48 @@ const styles = StyleSheet.create({
     ...shadow.sm,
   },
   orderIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: radius.md,
     backgroundColor: colors.surfaceTeal,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: spacing.md,
   },
   orderInfo: {
     flex: 1,
+    marginLeft: spacing.md,
   },
   orderName: {
-    fontWeight: "600",
+    ...typography.bodyMedium,
     color: colors.textPrimary,
-    fontSize: 15,
   },
   orderDate: {
+    ...typography.small,
     color: colors.textSecondary,
     marginTop: 2,
-    fontSize: 13,
   },
-  orderStatus: {
-    marginTop: spacing.sm,
+  statusBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.xxs,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: 999,
-    alignSelf: "flex-start",
+    paddingVertical: spacing.xxs,
+    borderRadius: radius.full,
   },
-  statusWarning: {
+  statusProcessing: {
     backgroundColor: colors.lightYellow,
   },
-  statusSuccess: {
-    backgroundColor: "#DBEAFE",
+  statusShipped: {
+    backgroundColor: colors.surfaceBlue,
   },
-  orderStatusText: {
-    fontSize: 11,
+  statusText: {
+    ...typography.tiny,
     fontWeight: "600",
   },
-  statusWarningText: {
+  statusTextProcessing: {
     color: colors.warning,
   },
-  statusSuccessText: {
+  statusTextShipped: {
     color: colors.accentBlue,
   },
 });
