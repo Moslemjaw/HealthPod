@@ -1,67 +1,257 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, RefreshControl } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, RefreshControl, Modal, TextInput, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
 import Animated, { FadeInDown, FadeInUp, Layout, SlideInRight } from "react-native-reanimated";
 import { colors, radius, shadow, spacing, typography } from "@/constants/design";
-import { confirmSchedule, getMedications, getSchedules } from "@/services/api";
+import { confirmSchedule, getMedications, getSchedules, addMedication } from "@/services/api";
 import { Medication, ScheduleItem } from "@/types";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const REMINDERS_STORAGE_KEY = "@healthpod_reminders";
+
+type Reminder = {
+  id: string;
+  name: string;
+  dosage: string;
+  time: string;
+  days: string[];
+  note?: string;
+  isDispenser: false;
+};
+
+// Get next 7 days starting from today
+const getWeekDays = () => {
+  const days = [];
+  const today = new Date();
+  
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + i);
+    days.push({
+      date: date,
+      dayNum: date.getDate(),
+      dayName: DAYS_SHORT[date.getDay()],
+      isToday: i === 0,
+      fullDate: date.toISOString().split('T')[0],
+    });
+  }
+  return days;
+};
 
 export default function ScheduleScreen() {
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [medications, setMedications] = useState<Medication[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showAddModal, setShowAddModal] = useState(false);
+  
+  // New reminder form state
+  const [newReminder, setNewReminder] = useState({
+    name: "",
+    dosage: "",
+    time: "09:00",
+    days: [...DAYS_SHORT],
+    note: "",
+  });
+
+  const weekDays = useMemo(() => getWeekDays(), []);
+  const selectedDayName = DAYS_SHORT[selectedDate.getDay()];
+  const isToday = selectedDate.toDateString() === new Date().toDateString();
+
+  // Load reminders from storage
+  const loadReminders = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(REMINDERS_STORAGE_KEY);
+      if (stored) {
+        setReminders(JSON.parse(stored));
+      }
+    } catch (e) {
+      console.error("Failed to load reminders:", e);
+    }
+  };
+
+  // Save reminders to storage
+  const saveReminders = async (newReminders: Reminder[]) => {
+    try {
+      await AsyncStorage.setItem(REMINDERS_STORAGE_KEY, JSON.stringify(newReminders));
+      setReminders(newReminders);
+    } catch (e) {
+      console.error("Failed to save reminders:", e);
+    }
+  };
 
   const fetchData = async () => {
     try {
       setError(null);
-      console.log("[Schedule Screen] Starting fetch...");
       const [scheduleData, medData] = await Promise.all([
         getSchedules(),
         getMedications(),
       ]);
-      console.log("[Schedule Screen] Fetched schedules:", scheduleData);
-      console.log("[Schedule Screen] Fetched medications:", medData);
-      console.log("[Schedule Screen] Schedule count:", scheduleData.length);
-      console.log("[Schedule Screen] Medication count:", medData.length);
-      
       setSchedules(scheduleData);
       setMedications(medData);
+      await loadReminders();
     } catch (err) {
-      console.error("[Schedule Screen] Error fetching schedule data:", err);
-      setError(`Failed to load schedule: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      console.error("Error fetching schedule data:", err);
+      setError("Failed to load schedule. Please try again.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  // Refresh when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      fetchData();
-    }, [])
-  );
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
     fetchData();
   }, []);
 
+  // Filter schedules for selected day
+  const filteredSchedules = useMemo(() => {
+    console.log("[Schedule] Filtering for day:", selectedDayName);
+    console.log("[Schedule] Total schedules:", schedules.length);
+    
+    return schedules.filter(schedule => {
+      // First check schedule's days array (from backend)
+      if (schedule.days && schedule.days.length > 0) {
+        const match = schedule.days.includes(selectedDayName);
+        console.log(`[Schedule] ${schedule.id} days:`, schedule.days, "match:", match);
+        return match;
+      }
+      
+      // Fallback: check medication's days
+      const med = medications.find(m => m.id === schedule.medicationId);
+      if (med?.days && med.days.length > 0) {
+        return med.days.includes(selectedDayName);
+      }
+      
+      return true; // Daily medication (no specific days)
+    });
+  }, [schedules, medications, selectedDayName]);
+
+  // Filter reminders for selected day
+  const filteredReminders = useMemo(() => {
+    return reminders.filter(reminder => {
+      if (reminder.days && reminder.days.length > 0) {
+        return reminder.days.includes(selectedDayName);
+      }
+      return true;
+    });
+  }, [reminders, selectedDayName]);
+
+  const allItems = useMemo(() => {
+    const dispenserItems = filteredSchedules.map(schedule => {
+      const med = medications.find(m => m.id === schedule.medicationId);
+      return {
+        id: schedule.id,
+        name: med?.name || "Unknown",
+        dosage: med?.dosage || "",
+        time: schedule.time,
+        isConfirmed: schedule.isConfirmed,
+        isDispenser: true,
+        frequency: schedule.frequency,
+      };
+    });
+
+    const reminderItems = filteredReminders.map(reminder => ({
+      id: reminder.id,
+      name: reminder.name,
+      dosage: reminder.dosage,
+      time: reminder.time,
+      isConfirmed: false,
+      isDispenser: false,
+      frequency: reminder.days.length === 7 ? "Daily" : reminder.days.join(", "),
+      note: reminder.note,
+    }));
+
+    return [...dispenserItems, ...reminderItems].sort((a, b) => a.time.localeCompare(b.time));
+  }, [filteredSchedules, filteredReminders, medications]);
+
   const confirmedCount = useMemo(
-    () => schedules.filter((item) => item.isConfirmed).length,
-    [schedules]
+    () => allItems.filter((item) => item.isConfirmed).length,
+    [allItems]
   );
 
-  const handleConfirm = async (id: string) => {
-    try {
-      const updated = await confirmSchedule(id);
-      setSchedules((prev) => prev.map((item) => (item.id === id ? { ...item, ...updated } : item)));
-    } catch (err) {
-      console.error("Error confirming schedule:", err);
+  const handleConfirm = async (id: string, isDispenser: boolean) => {
+    if (isDispenser) {
+      try {
+        const updated = await confirmSchedule(id);
+        setSchedules((prev) => prev.map((item) => (item.id === id ? { ...item, ...updated } : item)));
+      } catch (err) {
+        console.error("Error confirming schedule:", err);
+      }
+    } else {
+      // For reminders, just mark as done (stored locally for this session)
+      // In a real app, you'd want to persist this
+      Alert.alert("Reminder Completed", "Great job taking your medication!");
     }
+  };
+
+  const toggleDay = (day: string) => {
+    if (newReminder.days.includes(day)) {
+      setNewReminder(prev => ({ ...prev, days: prev.days.filter(d => d !== day) }));
+    } else {
+      setNewReminder(prev => ({ ...prev, days: [...prev.days, day] }));
+    }
+  };
+
+  const handleAddReminder = async () => {
+    if (!newReminder.name.trim()) {
+      Alert.alert("Required", "Please enter medication name");
+      return;
+    }
+    if (newReminder.days.length === 0) {
+      Alert.alert("Required", "Please select at least one day");
+      return;
+    }
+
+    const reminder: Reminder = {
+      id: `reminder-${Date.now()}`,
+      name: newReminder.name.trim(),
+      dosage: newReminder.dosage.trim() || "As needed",
+      time: newReminder.time,
+      days: newReminder.days,
+      note: newReminder.note.trim(),
+      isDispenser: false,
+    };
+
+    const newReminders = [...reminders, reminder];
+    await saveReminders(newReminders);
+    
+    setShowAddModal(false);
+    setNewReminder({
+      name: "",
+      dosage: "",
+      time: "09:00",
+      days: [...DAYS_SHORT],
+      note: "",
+    });
+    
+    Alert.alert("Success", "Reminder added successfully!");
+  };
+
+  const handleDeleteReminder = (id: string) => {
+    Alert.alert(
+      "Delete Reminder",
+      "Are you sure you want to delete this reminder?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive",
+          onPress: async () => {
+            const newReminders = reminders.filter(r => r.id !== id);
+            await saveReminders(newReminders);
+          }
+        }
+      ]
+    );
   };
 
   if (loading) {
@@ -76,7 +266,7 @@ export default function ScheduleScreen() {
     );
   }
 
-  const progressPercent = schedules.length === 0 ? 0 : Math.round((confirmedCount / schedules.length) * 100);
+  const progressPercent = allItems.length === 0 ? 0 : Math.round((confirmedCount / allItems.length) * 100);
 
   return (
     <View style={styles.container}>
@@ -89,7 +279,45 @@ export default function ScheduleScreen() {
           {/* Header */}
           <Animated.View entering={FadeInDown.duration(500)}>
             <Text style={styles.title}>Schedule</Text>
-            <Text style={styles.subtitle}>Today's medication plan</Text>
+            <Text style={styles.subtitle}>
+              {isToday ? "Today's medication plan" : `${selectedDayName}, ${selectedDate.toLocaleDateString()}`}
+            </Text>
+          </Animated.View>
+
+          {/* Calendar Strip */}
+          <Animated.View entering={FadeInDown.delay(100).duration(500)} style={styles.calendarStrip}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {weekDays.map((day, index) => {
+                const isSelected = day.fullDate === selectedDate.toISOString().split('T')[0];
+                return (
+                  <Pressable
+                    key={day.fullDate}
+                    style={[
+                      styles.dayCard,
+                      isSelected && styles.dayCardSelected,
+                      day.isToday && !isSelected && styles.dayCardToday,
+                    ]}
+                    onPress={() => setSelectedDate(day.date)}
+                  >
+                    <Text style={[
+                      styles.dayName,
+                      isSelected && styles.dayNameSelected,
+                    ]}>
+                      {day.dayName}
+                    </Text>
+                    <Text style={[
+                      styles.dayNum,
+                      isSelected && styles.dayNumSelected,
+                    ]}>
+                      {day.dayNum}
+                    </Text>
+                    {day.isToday && (
+                      <View style={[styles.todayDot, isSelected && styles.todayDotSelected]} />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </Animated.View>
 
           {/* Error Message */}
@@ -102,14 +330,16 @@ export default function ScheduleScreen() {
 
           {/* Progress Card */}
           <Animated.View 
-            entering={FadeInDown.delay(100).duration(500)} 
+            entering={FadeInDown.delay(200).duration(500)} 
             style={styles.progressCard}
           >
             <View style={styles.progressContent}>
               <View>
-                <Text style={styles.progressTitle}>Daily Progress</Text>
+                <Text style={styles.progressTitle}>
+                  {isToday ? "Daily Progress" : `${selectedDayName}'s Schedule`}
+                </Text>
                 <Text style={styles.progressSubtitle}>
-                  {confirmedCount} of {schedules.length} doses taken
+                  {confirmedCount} of {allItems.length} doses {isToday ? "taken" : "scheduled"}
                 </Text>
               </View>
               <View style={styles.progressCircle}>
@@ -122,33 +352,30 @@ export default function ScheduleScreen() {
           </Animated.View>
 
           {/* Empty State */}
-          {schedules.length === 0 && !error && (
+          {allItems.length === 0 && !error && (
             <View style={styles.emptyState}>
               <Ionicons name="calendar-outline" size={64} color={colors.textMuted} />
-              <Text style={styles.emptyTitle}>No Medications Scheduled</Text>
+              <Text style={styles.emptyTitle}>No Medications for {selectedDayName}</Text>
               <Text style={styles.emptyText}>
-                Add medications to your device to see them here
+                Add a reminder or configure your dispenser medications
               </Text>
             </View>
           )}
 
           {/* Timeline */}
-          {schedules.length > 0 && (
+          {allItems.length > 0 && (
             <View style={styles.timelineContainer}>
-              {schedules.map((item, index) => {
-                const med = medications.find((m) => m.id === item.medicationId);
-                const isConfirmed = item.isConfirmed;
-                const isLast = index === schedules.length - 1;
-
-                if (!med) {
-                  console.warn("[Schedule Screen] Medication not found for schedule item:", item);
-                  return null;
-                }
+              <Text style={styles.sectionTitle}>
+                {isToday ? "Today" : selectedDayName}'s Medications
+              </Text>
+              
+              {allItems.map((item, index) => {
+                const isLast = index === allItems.length - 1;
 
                 return (
                   <Animated.View 
                     key={item.id}
-                    entering={SlideInRight.delay(200 + index * 100).duration(400)}
+                    entering={SlideInRight.delay(300 + index * 100).duration(400)}
                     layout={Layout.springify()}
                     style={styles.timelineItem}
                   >
@@ -158,49 +385,65 @@ export default function ScheduleScreen() {
                       <View style={styles.timelineLineContainer}>
                         <View style={[
                           styles.timelineDot,
-                          isConfirmed && styles.timelineDotDone
+                          item.isConfirmed && styles.timelineDotDone
                         ]} />
                         {!isLast && (
                           <View style={[
                             styles.timelineLine,
-                            isConfirmed && styles.timelineLineDone
+                            item.isConfirmed && styles.timelineLineDone
                           ]} />
                         )}
                       </View>
                     </View>
 
                     {/* Card */}
-                    <View style={[styles.scheduleCard, isConfirmed && styles.scheduleCardDone]}>
+                    <Pressable 
+                      style={[styles.scheduleCard, item.isConfirmed && styles.scheduleCardDone]}
+                      onLongPress={() => !item.isDispenser && handleDeleteReminder(item.id)}
+                    >
                       <View style={styles.cardMain}>
                         <View style={[
                           styles.medIcon,
-                          isConfirmed && styles.medIconDone
+                          item.isConfirmed && styles.medIconDone,
+                          !item.isDispenser && styles.medIconReminder
                         ]}>
                           <Ionicons 
-                            name={isConfirmed ? "checkmark" : "medical"} 
+                            name={item.isConfirmed ? "checkmark" : item.isDispenser ? "medical" : "notifications"} 
                             size={20} 
-                            color={isConfirmed ? colors.success : colors.primary} 
+                            color={item.isConfirmed ? colors.success : item.isDispenser ? colors.primary : colors.accentOrange} 
                           />
                         </View>
                         <View style={styles.medInfo}>
-                          <Text style={[styles.medName, isConfirmed && styles.medNameDone]}>
-                            {med.name}
-                          </Text>
+                          <View style={styles.medNameRow}>
+                            <Text style={[styles.medName, item.isConfirmed && styles.medNameDone]}>
+                              {item.name}
+                            </Text>
+                            {!item.isDispenser && (
+                              <View style={styles.reminderBadge}>
+                                <Text style={styles.reminderBadgeText}>Reminder</Text>
+                              </View>
+                            )}
+                          </View>
                           <Text style={styles.medDose}>
-                            {med.dosage} • {item.frequency}
+                            {item.dosage} • {item.frequency}
                           </Text>
+                          {item.note && (
+                            <Text style={styles.medNote}>{item.note}</Text>
+                          )}
                         </View>
                       </View>
 
-                      {!isConfirmed && (
+                      {!item.isConfirmed && isToday && (
                         <Pressable
-                          style={styles.actionBtn}
-                          onPress={() => handleConfirm(item.id)}
+                          style={[styles.actionBtn, !item.isDispenser && styles.actionBtnReminder]}
+                          onPress={() => handleConfirm(item.id, item.isDispenser)}
                         >
-                          <Text style={styles.actionText}>Take</Text>
+                          <Text style={styles.actionText}>
+                            {item.isDispenser ? "Take" : "Done"}
+                          </Text>
                         </Pressable>
                       )}
-                    </View>
+                    </Pressable>
                   </Animated.View>
                 );
               })}
@@ -211,15 +454,109 @@ export default function ScheduleScreen() {
         </ScrollView>
       </SafeAreaView>
 
-      {/* FAB */}
+      {/* FAB - Add Reminder */}
       <Animated.View 
         entering={FadeInUp.delay(600).duration(400)}
         style={styles.fabContainer}
       >
-        <Pressable style={styles.fab}>
+        <Pressable style={styles.fab} onPress={() => setShowAddModal(true)}>
           <Ionicons name="add" size={28} color={colors.lightText} />
         </Pressable>
       </Animated.View>
+
+      {/* Add Reminder Modal */}
+      <Modal
+        visible={showAddModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowAddModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Pressable onPress={() => setShowAddModal(false)}>
+              <Ionicons name="close" size={24} color={colors.textPrimary} />
+            </Pressable>
+            <Text style={styles.modalTitle}>Add Reminder</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Text style={styles.modalSubtitle}>
+              Add a medication reminder (not linked to dispenser)
+            </Text>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Medication Name *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. Vitamin D"
+                value={newReminder.name}
+                onChangeText={(text) => setNewReminder(prev => ({ ...prev, name: text }))}
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Dosage</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 1 pill"
+                value={newReminder.dosage}
+                onChangeText={(text) => setNewReminder(prev => ({ ...prev, dosage: text }))}
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Time</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g. 09:00"
+                value={newReminder.time}
+                onChangeText={(text) => setNewReminder(prev => ({ ...prev, time: text }))}
+                placeholderTextColor={colors.textMuted}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Days</Text>
+              <View style={styles.daysRow}>
+                {DAYS_SHORT.map((day) => {
+                  const isSelected = newReminder.days.includes(day);
+                  return (
+                    <Pressable 
+                      key={day}
+                      style={[styles.dayChip, isSelected && styles.dayChipSelected]}
+                      onPress={() => toggleDay(day)}
+                    >
+                      <Text style={[styles.dayChipText, isSelected && styles.dayChipTextSelected]}>
+                        {day}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Note (optional)</Text>
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                placeholder="e.g. Take with food"
+                value={newReminder.note}
+                onChangeText={(text) => setNewReminder(prev => ({ ...prev, note: text }))}
+                placeholderTextColor={colors.textMuted}
+                multiline
+                numberOfLines={2}
+              />
+            </View>
+
+            <Pressable style={styles.saveBtn} onPress={handleAddReminder}>
+              <Text style={styles.saveBtnText}>Add Reminder</Text>
+            </Pressable>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </View>
   );
 }
@@ -249,7 +586,61 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.body,
     color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  calendarStrip: {
     marginBottom: spacing.lg,
+    marginHorizontal: -spacing.lg,
+    paddingHorizontal: spacing.lg,
+  },
+  dayCard: {
+    width: 52,
+    height: 72,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  dayCardSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  dayCardToday: {
+    borderColor: colors.primary,
+    borderWidth: 2,
+  },
+  dayName: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    marginBottom: 4,
+  },
+  dayNameSelected: {
+    color: colors.lightText,
+  },
+  dayNum: {
+    ...typography.h3,
+    color: colors.textPrimary,
+  },
+  dayNumSelected: {
+    color: colors.lightText,
+  },
+  todayDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+    marginTop: 4,
+  },
+  todayDotSelected: {
+    backgroundColor: colors.lightText,
+  },
+  sectionTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginBottom: spacing.md,
   },
   errorCard: {
     flexDirection: "row",
@@ -351,7 +742,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     width: 20,
     flex: 1,
-    marginRight: -10, // Align with dot center
+    marginRight: -10,
   },
   timelineDot: {
     width: 12,
@@ -407,8 +798,16 @@ const styles = StyleSheet.create({
   medIconDone: {
     backgroundColor: colors.surfaceAlt,
   },
+  medIconReminder: {
+    backgroundColor: colors.surfaceOrange,
+  },
   medInfo: {
     flex: 1,
+  },
+  medNameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
   },
   medName: {
     ...typography.bodyMedium,
@@ -423,12 +822,32 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.textSecondary,
   },
+  medNote: {
+    ...typography.tiny,
+    color: colors.textMuted,
+    fontStyle: "italic",
+    marginTop: 2,
+  },
+  reminderBadge: {
+    backgroundColor: colors.surfaceOrange,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+  },
+  reminderBadgeText: {
+    ...typography.tiny,
+    color: colors.accentOrange,
+    fontWeight: "600",
+  },
   actionBtn: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
     borderRadius: radius.full,
     marginLeft: spacing.sm,
+  },
+  actionBtnReminder: {
+    backgroundColor: colors.accentOrange,
   },
   actionText: {
     ...typography.caption,
@@ -448,5 +867,89 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.lg,
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  modalTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+  },
+  modalContent: {
+    padding: spacing.lg,
+  },
+  modalSubtitle: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.xl,
+  },
+  inputGroup: {
+    marginBottom: spacing.lg,
+  },
+  label: {
+    ...typography.small,
+    fontWeight: "600",
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  input: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    fontSize: 16,
+    color: colors.textPrimary,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  inputMultiline: {
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  daysRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+  },
+  dayChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  dayChipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  dayChipText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+  dayChipTextSelected: {
+    color: colors.lightText,
+  },
+  saveBtn: {
+    backgroundColor: colors.primary,
+    paddingVertical: spacing.md,
+    borderRadius: radius.lg,
+    alignItems: "center",
+    marginTop: spacing.lg,
+  },
+  saveBtnText: {
+    ...typography.body,
+    color: colors.lightText,
+    fontWeight: "700",
   },
 });

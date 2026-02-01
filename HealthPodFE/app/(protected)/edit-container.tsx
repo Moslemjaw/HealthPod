@@ -1,32 +1,36 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, TextInput, View, Pressable, KeyboardAvoidingView, Platform, Alert, ScrollView, ActivityIndicator } from "react-native";
+import { StyleSheet, Text, TextInput, View, Pressable, Alert, ScrollView, ActivityIndicator, SafeAreaView } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { PrimaryButton } from "@/components/PrimaryButton";
 import { colors, radius, shadow, spacing, typography } from "@/constants/design";
-import { updateContainer, getDevices } from "@/services/api";
+import { updateContainer, addMedication } from "@/services/api";
+
+const ALL_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function EditContainerScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const deviceId = params.deviceId as string;
   const containerNumber = parseInt(params.containerNumber as string, 10);
+  const medId = params.medId as string || "";
   
   const [medName, setMedName] = useState(params.medName as string || "");
   const [dosage, setDosage] = useState(params.dosage as string || "");
-  // Try to extract time from schedule if possible, or default
-  const [time, setTime] = useState(""); 
+  const [time, setTime] = useState(params.time as string || "09:00"); 
+  const [days, setDays] = useState<string[]>(
+    params.days ? (params.days as string).split(",").filter(Boolean) : [...ALL_DAYS]
+  );
   const [loading, setLoading] = useState(false);
 
-  // Initialize time from passed schedule if it exists
-  React.useEffect(() => {
-    if (params.schedule) {
-      // Very naive parser: looks for a time like "08:00"
-      const match = (params.schedule as string).match(/\d{2}:\d{2}/);
-      if (match) setTime(match[0]);
+  const toggleDay = (day: string) => {
+    if (days.includes(day)) {
+      setDays(days.filter(d => d !== day));
+    } else {
+      setDays([...days, day]);
     }
-  }, [params.schedule]);
+  };
 
   const handleSave = async () => {
     if (!medName.trim()) {
@@ -34,20 +38,46 @@ export default function EditContainerScreen() {
       return;
     }
 
+    if (days.length === 0) {
+      Alert.alert("Required", "Please select at least one day");
+      return;
+    }
+
     setLoading(true);
     try {
+      const scheduleStr = days.length === 7 
+        ? `Daily at ${time}` 
+        : `${days.join(", ")} at ${time}`;
+
+      // 1. Create/Update Medication record
+      const medication = await addMedication({
+        name: medName,
+        dosage: dosage,
+        schedule: scheduleStr,
+        time: time,
+        days: days,
+        containerNumber: containerNumber,
+        remaining: 30,
+        total: 30,
+        refillThreshold: 5,
+      });
+      
+      // 2. Update device container
       await updateContainer(deviceId, containerNumber, {
+        medicationId: medication.id,
         medicationName: medName,
         dosage: dosage,
         reminderTime: time,
-        reminderEnabled: !!time
+        reminderDays: days,
+        reminderEnabled: true
       });
       
-      Alert.alert("Success", "Container updated successfully", [
+      Alert.alert("Success", "Medication updated successfully", [
         { text: "OK", onPress: () => router.back() }
       ]);
     } catch (error) {
-      Alert.alert("Error", "Failed to update container");
+      console.error("[EditContainer] Error:", error);
+      Alert.alert("Error", "Failed to update medication");
     } finally {
       setLoading(false);
     }
@@ -64,7 +94,14 @@ export default function EditContainerScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.form}>
+          <Animated.View entering={FadeInDown.duration(400)} style={styles.form}>
+            <View style={styles.containerBadge}>
+              <View style={styles.badgeIcon}>
+                <Text style={styles.badgeNumber}>{containerNumber}</Text>
+              </View>
+              <Text style={styles.badgeText}>Container {containerNumber} • Sensor C{containerNumber}</Text>
+            </View>
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Medication Name</Text>
               <TextInput
@@ -98,19 +135,40 @@ export default function EditContainerScreen() {
               />
             </View>
 
-            <PrimaryButton
-              title={loading ? "Saving..." : "Save Changes"}
-              onPress={handleSave}
-              disabled={loading}
-            />
-          </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Days</Text>
+              <View style={styles.daysRow}>
+                {ALL_DAYS.map((day) => {
+                  const isSelected = days.includes(day);
+                  return (
+                    <Pressable 
+                      key={day}
+                      style={[styles.dayChip, isSelected && styles.dayChipSelected]}
+                      onPress={() => toggleDay(day)}
+                    >
+                      <Text style={[styles.dayChipText, isSelected && styles.dayChipTextSelected]}>
+                        {day}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.buttonContainer}>
+              <PrimaryButton
+                title={loading ? "Saving..." : "Save Changes"}
+                onPress={handleSave}
+                disabled={loading}
+                size="lg"
+              />
+            </View>
+          </Animated.View>
         </ScrollView>
       </SafeAreaView>
     </View>
   );
 }
-
-import { SafeAreaView } from "react-native-safe-area-context";
 
 const styles = StyleSheet.create({
   container: {
@@ -135,9 +193,37 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   form: {
     gap: spacing.lg,
+  },
+  containerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: colors.surfaceTeal,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    marginBottom: spacing.sm,
+  },
+  badgeIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeNumber: {
+    color: colors.lightText,
+    fontWeight: "700",
+    fontSize: 16,
+  },
+  badgeText: {
+    ...typography.body,
+    color: colors.primaryDark,
+    fontWeight: "600",
   },
   inputGroup: {
     gap: spacing.xs,
@@ -156,5 +242,34 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  daysRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  dayChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  dayChipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  dayChipText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+  dayChipTextSelected: {
+    color: colors.lightText,
+  },
+  buttonContainer: {
+    marginTop: spacing.md,
   },
 });

@@ -12,24 +12,59 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { colors, radius, shadow, spacing } from "@/constants/design";
 import { ChatMessage } from "@/types";
 import { useHealth } from "@/context/HealthContext";
-import { sendChatMessage } from "@/services/api";
+import { sendChatMessage, getMedications, getDevices } from "@/services/api";
+
+const REMINDERS_STORAGE_KEY = "@healthpod_reminders";
+
+const FormattedText = ({ text, style }: { text: string; style: any }) => {
+  if (!text) return null;
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+
+  return (
+    <Text style={style}>
+      {parts.map((part, index) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return (
+            <Text key={index} style={{ fontWeight: "700" }}>
+              {part.slice(2, -2)}
+            </Text>
+          );
+        }
+        return part;
+      })}
+    </Text>
+  );
+};
 
 export default function ChatScreen() {
-  const { user, medications, health } = useHealth();
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      from: "bot",
-      text: `Hi ${user?.name || "there"}! 👋 I'm your HealthPod AI assistant. I know about your medications and health data, so feel free to ask me anything about your health routine, medication schedules, or general wellness tips.`,
-      createdAt: new Date().toISOString(),
-    },
-  ]);
+  const { user, health, streak } = useHealth();
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [contextLoaded, setContextLoaded] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Load all context data on mount
+  useEffect(() => {
+    loadContextAndInit();
+  }, []);
+
+  const loadContextAndInit = async () => {
+    // Initialize with welcome message
+    setMessages([
+      {
+        id: "welcome",
+        from: "bot",
+        text: `Hi ${user?.name || "there"}! 👋 I'm your HealthPod AI assistant. I have access to your profile, medications, health data, and reminders. Feel free to ask me anything about:\n\n• Your medication schedule\n• Drug interactions\n• Health tips based on your data\n• Lifestyle recommendations\n• General wellness advice`,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    setContextLoaded(true);
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
@@ -50,26 +85,87 @@ export default function ChatScreen() {
     setLoading(true);
 
     try {
-      // Build context for DeepSeek
+      // Fetch latest data from backend
+      const [dispenserMeds, devices, remindersData] = await Promise.all([
+        getMedications().catch(() => []),
+        getDevices().catch(() => []),
+        AsyncStorage.getItem(REMINDERS_STORAGE_KEY),
+      ]);
+
+      const reminders = remindersData ? JSON.parse(remindersData) : [];
+      const device = devices[0];
+
+      // Build comprehensive context for AI
       const userContext = {
-        name: user?.name,
-        gender: user?.gender,
-        age: user?.age,
-        height: user?.height,
-        weight: user?.weight,
-        medications: medications.map((m) => ({
-          name: m.name,
-          dosage: m.dosage,
-          schedule: m.schedule,
-          remaining: m.remaining,
-        })),
-        health: {
+        // User Profile
+        profile: {
+          name: user?.name,
+          email: user?.email,
+          gender: user?.gender,
+          age: user?.age,
+          height: user?.height,
+          weight: user?.weight,
+          bmi: user?.height && user?.weight 
+            ? (user.weight / Math.pow(user.height / 100, 2)).toFixed(1) 
+            : null,
+        },
+        
+        // Health Stats
+        healthStats: {
           heartRate: health.heartRate,
           steps: health.steps,
           sleepHours: health.sleepHours,
-          hydration: health.hydration,
+          hydration: `${health.hydration}/8 glasses`,
         },
+        
+        // Streak & Progress
+        progress: {
+          currentStreak: streak.currentStreak,
+          longestStreak: streak.longestStreak,
+          totalXP: streak.totalXP,
+          level: streak.level,
+        },
+        
+        // Dispenser Medications (from backend)
+        dispenserMedications: dispenserMeds.map((m: any) => ({
+          name: m.name,
+          dosage: m.dosage,
+          schedule: m.schedule,
+          time: m.time,
+          days: m.days,
+          containerNumber: m.containerNumber,
+          remaining: m.remaining,
+          total: m.total,
+        })),
+        
+        // Device & Container Status
+        dispenser: device ? {
+          name: device.name,
+          isConnected: device.isConnected,
+          containers: device.containers?.map((c: any) => ({
+            number: c.number,
+            medication: c.medicationName || "Empty",
+            dosage: c.dosage || "-",
+            reminderTime: c.reminderTime,
+            stockLevel: c.stockLevel,
+          })),
+        } : null,
+        
+        // Custom Reminders (non-dispenser)
+        reminders: reminders.map((r: any) => ({
+          name: r.name,
+          dosage: r.dosage,
+          time: r.time,
+          days: r.days,
+          note: r.note,
+        })),
+        
+        // Current date/time for context
+        currentDateTime: new Date().toLocaleString(),
+        dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
       };
+
+      console.log("[Chat] Sending context:", JSON.stringify(userContext, null, 2));
 
       const response = await sendChatMessage(input.trim(), userContext);
 
@@ -82,10 +178,11 @@ export default function ChatScreen() {
 
       setMessages((prev) => [...prev, botMessage]);
     } catch (error) {
+      console.error("[Chat] Error:", error);
       const errorMessage: ChatMessage = {
         id: `error-${Date.now()}`,
         from: "bot",
-        text: "Sorry, I'm having trouble connecting right now. Please try again in a moment.",
+        text: "Sorry, I'm having trouble connecting right now. Please check your internet connection and try again.",
         createdAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -97,6 +194,18 @@ export default function ChatScreen() {
   const formatTime = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Quick suggestion buttons
+  const suggestions = [
+    "What medications should I take today?",
+    "Any drug interactions I should know about?",
+    "Health tips based on my data",
+    "How is my medication adherence?",
+  ];
+
+  const handleSuggestion = (text: string) => {
+    setInput(text);
   };
 
   return (
@@ -145,14 +254,13 @@ export default function ChatScreen() {
                 message.from === "user" ? styles.userContent : styles.botContent,
               ]}
             >
-              <Text
+              <FormattedText
+                text={message.text}
                 style={[
                   styles.messageText,
                   message.from === "user" && styles.userText,
                 ]}
-              >
-                {message.text}
-              </Text>
+              />
               <Text style={styles.messageTime}>{formatTime(message.createdAt)}</Text>
             </View>
           </View>
@@ -165,8 +273,25 @@ export default function ChatScreen() {
             </View>
             <View style={[styles.messageContent, styles.botContent, styles.loadingContent]}>
               <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.loadingText}>Thinking...</Text>
+              <Text style={styles.loadingText}>Analyzing your data...</Text>
             </View>
+          </View>
+        )}
+
+        {/* Quick Suggestions - show only when no user messages yet */}
+        {messages.length === 1 && !loading && (
+          <View style={styles.suggestionsContainer}>
+            <Text style={styles.suggestionsTitle}>Quick questions:</Text>
+            {suggestions.map((suggestion, index) => (
+              <Pressable
+                key={index}
+                style={styles.suggestionChip}
+                onPress={() => handleSuggestion(suggestion)}
+              >
+                <Ionicons name="chatbubble-outline" size={14} color={colors.primary} />
+                <Text style={styles.suggestionText}>{suggestion}</Text>
+              </Pressable>
+            ))}
           </View>
         )}
       </ScrollView>
@@ -268,7 +393,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   messageContent: {
-    maxWidth: "75%",
+    maxWidth: "80%",
     borderRadius: radius.lg,
     padding: spacing.md,
   },
@@ -304,6 +429,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
   },
+  suggestionsContainer: {
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.lg,
+  },
+  suggestionsTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  suggestionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.card,
+    padding: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    marginBottom: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: colors.textPrimary,
+    flex: 1,
+  },
   inputContainer: {
     padding: spacing.md,
     backgroundColor: colors.card,
@@ -337,4 +491,3 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
 });
-

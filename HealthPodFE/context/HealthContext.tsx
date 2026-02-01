@@ -19,6 +19,7 @@ type UserProfile = {
   age?: number;
   height?: number;
   weight?: number;
+  avatarUri?: string;
   profileComplete?: boolean;
   deviceSetupComplete?: boolean;
   createdAt?: string;

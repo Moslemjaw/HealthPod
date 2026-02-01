@@ -4,5 +4,6 @@ export type ScheduleItem = {
   time: string;
   frequency: string;
   isConfirmed: boolean;
+  days?: string[]; // Days this schedule applies to
 };
 

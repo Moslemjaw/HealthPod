@@ -1,25 +1,86 @@
-import React from "react";
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, Pressable, Dimensions } from "react-native";
+import React, { useState } from "react";
+import { StyleSheet, Text, View, ScrollView, SafeAreaView, Pressable, Dimensions, Alert, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown, FadeInRight, FadeInUp } from "react-native-reanimated";
-import { colors, radius, shadow, spacing, gradients, typography } from "@/constants/design";
+import { colors, radius, shadow, spacing, typography } from "@/constants/design";
 
 const { width } = Dimensions.get("window");
 
-const recommended = [
-  { id: "1", name: "Pill Organizer", price: "$12.99", icon: "grid-outline", color: colors.accentPurple, bg: colors.surfacePurple },
-  { id: "2", name: "Extra Cartridges", price: "$24.99", icon: "layers-outline", color: colors.primary, bg: colors.surfaceTeal },
-  { id: "3", name: "Travel Case", price: "$19.99", icon: "briefcase-outline", color: colors.accentBlue, bg: colors.surfaceBlue },
-  { id: "4", name: "Cleaning Kit", price: "$9.99", icon: "sparkles-outline", color: colors.accentOrange, bg: colors.surfaceOrange },
-];
+type Product = {
+  id: string;
+  name: string;
+  description: string;
+  price: string;
+  priceValue: number;
+  icon: string;
+  color: string;
+  bg: string;
+  comingSoon?: boolean;
+};
 
-const orders = [
-  { id: "o1", name: "Metformin Cartridge Pack", date: "Jan 16, 2026", status: "Processing", icon: "cube" },
-  { id: "o2", name: "Vitamin D Refill Pack", date: "Jan 8, 2026", status: "Shipped", icon: "airplane" },
+const products: Product[] = [
+  { 
+    id: "1", 
+    name: "HealthPod Dispenser", 
+    description: "Smart pill dispenser with 3 containers",
+    price: "15 KD", 
+    priceValue: 15,
+    icon: "cube-outline", 
+    color: colors.primary, 
+    bg: colors.surfaceTeal 
+  },
+  { 
+    id: "2", 
+    name: "Extra Containers", 
+    description: "Pack of 3 replacement containers",
+    price: "3 KD", 
+    priceValue: 3,
+    icon: "layers-outline", 
+    color: colors.accentPurple, 
+    bg: colors.surfacePurple 
+  },
+  { 
+    id: "3", 
+    name: "HealthPod Band", 
+    description: "Smart health tracking wearable",
+    price: "Coming Soon", 
+    priceValue: 0,
+    icon: "watch-outline", 
+    color: colors.accentBlue, 
+    bg: colors.surfaceBlue,
+    comingSoon: true
+  },
 ];
 
 export default function StoreScreen() {
+  const [cart, setCart] = useState<{ id: string; quantity: number }[]>([]);
+
+  const addToCart = (product: Product) => {
+    if (product.comingSoon) {
+      Alert.alert("Coming Soon", "The HealthPod Band will be available soon! Stay tuned.");
+      return;
+    }
+    
+    const existing = cart.find(item => item.id === product.id);
+    if (existing) {
+      setCart(cart.map(item => 
+        item.id === product.id 
+          ? { ...item, quantity: item.quantity + 1 }
+          : item
+      ));
+    } else {
+      setCart([...cart, { id: product.id, quantity: 1 }]);
+    }
+    
+    Alert.alert("Added to Cart", `${product.name} has been added to your cart.`);
+  };
+
+  const getCartQuantity = (productId: string) => {
+    return cart.find(item => item.id === productId)?.quantity || 0;
+  };
+
+  const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safe}>
@@ -28,110 +89,121 @@ export default function StoreScreen() {
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
-          <Animated.View entering={FadeInDown.duration(500)}>
-            <Text style={styles.title}>Store</Text>
-            <Text style={styles.subtitle}>Refills and accessories</Text>
-          </Animated.View>
-
-          {/* Auto-Refill Banner */}
-          <Animated.View entering={FadeInDown.delay(100).duration(500)}>
-            <LinearGradient
-              colors={gradients.primary}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.banner}
-            >
-              <View style={styles.bannerContent}>
-                <View style={styles.bannerIconBox}>
-                  <Ionicons name="sync" size={24} color={colors.lightText} />
-                </View>
-                <View style={styles.bannerText}>
-                  <Text style={styles.bannerTitle}>Auto-Refill Active</Text>
-                  <Text style={styles.bannerSub}>Your meds refill automatically</Text>
-                </View>
-              </View>
-              <Pressable style={styles.bannerBtn}>
-                <Text style={styles.bannerBtnText}>Manage</Text>
-              </Pressable>
-            </LinearGradient>
-          </Animated.View>
-
-          {/* Recommended Products */}
-          <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recommended</Text>
-              <Pressable>
-                <Text style={styles.seeAll}>See all</Text>
-              </Pressable>
+          <Animated.View entering={FadeInDown.duration(500)} style={styles.header}>
+            <View>
+              <Text style={styles.title}>Store</Text>
+              <Text style={styles.subtitle}>HealthPod products & accessories</Text>
             </View>
+            {totalItems > 0 && (
+              <Pressable style={styles.cartBtn}>
+                <Ionicons name="cart-outline" size={24} color={colors.primary} />
+                <View style={styles.cartBadge}>
+                  <Text style={styles.cartBadgeText}>{totalItems}</Text>
+                </View>
+              </Pressable>
+            )}
           </Animated.View>
 
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.productsScroll}
-          >
-            {recommended.map((item, i) => (
+          {/* Products Section */}
+          <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+            <Text style={styles.sectionTitle}>Our Products</Text>
+          </Animated.View>
+
+          <View style={styles.productsGrid}>
+            {products.map((product, i) => (
               <Animated.View
-                key={item.id}
-                entering={FadeInRight.delay(300 + i * 80).duration(400)}
+                key={product.id}
+                entering={FadeInUp.delay(200 + i * 100).duration(400)}
+                style={styles.productCardWrapper}
               >
-                <Pressable style={styles.productCard}>
-                  <View style={[styles.productIcon, { backgroundColor: item.bg }]}>
-                    <Ionicons name={item.icon as any} size={28} color={item.color} />
+                <Pressable 
+                  style={[styles.productCard, product.comingSoon && styles.productCardDisabled]}
+                  onPress={() => addToCart(product)}
+                >
+                  <View style={[styles.productIcon, { backgroundColor: product.bg }]}>
+                    <Ionicons name={product.icon as any} size={32} color={product.color} />
                   </View>
-                  <Text style={styles.productName}>{item.name}</Text>
-                  <Text style={styles.productPrice}>{item.price}</Text>
-                  <Pressable style={styles.addBtn}>
-                    <Ionicons name="add" size={18} color={colors.lightText} />
-                  </Pressable>
+                  
+                  <Text style={styles.productName}>{product.name}</Text>
+                  <Text style={styles.productDescription}>{product.description}</Text>
+                  
+                  <View style={styles.productFooter}>
+                    <Text style={[
+                      styles.productPrice, 
+                      product.comingSoon && styles.productPriceDisabled
+                    ]}>
+                      {product.price}
+                    </Text>
+                    
+                    {!product.comingSoon && (
+                      <Pressable 
+                        style={styles.addBtn}
+                        onPress={() => addToCart(product)}
+                      >
+                        <Ionicons name="add" size={20} color={colors.lightText} />
+                      </Pressable>
+                    )}
+                  </View>
+                  
+                  {getCartQuantity(product.id) > 0 && (
+                    <View style={styles.quantityBadge}>
+                      <Text style={styles.quantityText}>{getCartQuantity(product.id)}</Text>
+                    </View>
+                  )}
                 </Pressable>
               </Animated.View>
             ))}
-          </ScrollView>
+          </View>
 
-          {/* Recent Orders */}
-          <Animated.View entering={FadeInUp.delay(400).duration(500)}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Orders</Text>
-              <Pressable>
-                <Text style={styles.seeAll}>View all</Text>
-              </Pressable>
+          {/* Features Section */}
+          <Animated.View entering={FadeInUp.delay(500).duration(500)} style={styles.featuresSection}>
+            <Text style={styles.sectionTitle}>Why HealthPod?</Text>
+            
+            <View style={styles.featureCard}>
+              <View style={[styles.featureIcon, { backgroundColor: colors.surfaceTeal }]}>
+                <Ionicons name="shield-checkmark-outline" size={24} color={colors.primary} />
+              </View>
+              <View style={styles.featureContent}>
+                <Text style={styles.featureTitle}>Smart Dispensing</Text>
+                <Text style={styles.featureText}>Automated pill dispensing with sensor-based stock tracking</Text>
+              </View>
+            </View>
+            
+            <View style={styles.featureCard}>
+              <View style={[styles.featureIcon, { backgroundColor: colors.surfacePurple }]}>
+                <Ionicons name="notifications-outline" size={24} color={colors.accentPurple} />
+              </View>
+              <View style={styles.featureContent}>
+                <Text style={styles.featureTitle}>Smart Reminders</Text>
+                <Text style={styles.featureText}>Never miss a dose with customizable notifications</Text>
+              </View>
+            </View>
+            
+            <View style={styles.featureCard}>
+              <View style={[styles.featureIcon, { backgroundColor: colors.surfaceBlue }]}>
+                <Ionicons name="analytics-outline" size={24} color={colors.accentBlue} />
+              </View>
+              <View style={styles.featureContent}>
+                <Text style={styles.featureTitle}>Health Insights</Text>
+                <Text style={styles.featureText}>AI-powered analysis and medication tracking</Text>
+              </View>
             </View>
           </Animated.View>
 
-          {orders.map((order, i) => (
-            <Animated.View
-              key={order.id}
-              entering={FadeInUp.delay(500 + i * 100).duration(400)}
-            >
-              <Pressable style={styles.orderCard}>
-                <View style={styles.orderIcon}>
-                  <Ionicons name="cube-outline" size={24} color={colors.primary} />
-                </View>
-                <View style={styles.orderInfo}>
-                  <Text style={styles.orderName}>{order.name}</Text>
-                  <Text style={styles.orderDate}>{order.date}</Text>
-                </View>
-                <View style={[
-                  styles.statusBadge,
-                  order.status === "Processing" ? styles.statusProcessing : styles.statusShipped
-                ]}>
-                  <Ionicons 
-                    name={order.status === "Processing" ? "time-outline" : "airplane-outline"} 
-                    size={14} 
-                    color={order.status === "Processing" ? colors.warning : colors.accentBlue}
-                  />
-                  <Text style={[
-                    styles.statusText,
-                    order.status === "Processing" ? styles.statusTextProcessing : styles.statusTextShipped
-                  ]}>
-                    {order.status}
-                  </Text>
-                </View>
-              </Pressable>
-            </Animated.View>
-          ))}
+          {/* Recent Orders */}
+          <Animated.View entering={FadeInUp.delay(600).duration(500)}>
+            <Text style={styles.sectionTitle}>Recent Orders</Text>
+          </Animated.View>
+
+          <Animated.View entering={FadeInUp.delay(700).duration(400)} style={styles.emptyOrders}>
+            <View style={styles.emptyOrdersIcon}>
+              <Ionicons name="receipt-outline" size={48} color={colors.textMuted} />
+            </View>
+            <Text style={styles.emptyOrdersTitle}>No Orders Yet</Text>
+            <Text style={styles.emptyOrdersText}>
+              Your order history will appear here once you make a purchase.
+            </Text>
+          </Animated.View>
 
           <View style={{ height: 100 }} />
         </ScrollView>
@@ -152,6 +224,12 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingTop: spacing.xl,
   },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: spacing.xl,
+  },
   title: {
     ...typography.h1,
     color: colors.textPrimary,
@@ -160,99 +238,101 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.body,
     color: colors.textSecondary,
-    marginBottom: spacing.lg,
   },
-  banner: {
-    borderRadius: radius.xl,
-    padding: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.xl,
-    ...shadow.md,
-  },
-  bannerContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  bannerIconBox: {
+  cartBtn: {
     width: 48,
     height: 48,
-    borderRadius: radius.md,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceTeal,
     alignItems: "center",
     justifyContent: "center",
   },
-  bannerText: {},
-  bannerTitle: {
-    ...typography.bodyMedium,
-    color: colors.lightText,
-  },
-  bannerSub: {
-    ...typography.small,
-    color: colors.lightText,
-    opacity: 0.85,
-    marginTop: 2,
-  },
-  bannerBtn: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-  },
-  bannerBtnText: {
-    ...typography.small,
-    fontWeight: "600",
-    color: colors.lightText,
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  cartBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.error,
     alignItems: "center",
-    marginBottom: spacing.md,
+    justifyContent: "center",
+  },
+  cartBadgeText: {
+    ...typography.tiny,
+    color: colors.lightText,
+    fontWeight: "700",
   },
   sectionTitle: {
     ...typography.h3,
     color: colors.textPrimary,
+    marginBottom: spacing.md,
   },
-  seeAll: {
-    ...typography.small,
-    color: colors.primary,
-    fontWeight: "600",
-  },
-  productsScroll: {
-    paddingRight: spacing.lg,
+  productsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
     marginBottom: spacing.xl,
   },
+  productCardWrapper: {
+    width: (width - spacing.lg * 2 - spacing.md) / 2,
+  },
   productCard: {
-    width: 140,
     backgroundColor: colors.card,
     borderRadius: radius.xl,
     padding: spacing.md,
-    marginRight: spacing.md,
     alignItems: "center",
     ...shadow.sm,
+    position: "relative",
+    height: 260,
+    width: "100%",
+    justifyContent: "space-between",
+  },
+  productCardDisabled: {
+    opacity: 1,
   },
   productIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.lg,
+    width: 80,
+    height: 80,
+    borderRadius: radius.xl,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: spacing.sm,
+    marginTop: spacing.md,
   },
   productName: {
-    ...typography.small,
-    fontWeight: "600",
+    ...typography.bodyMedium,
+    fontWeight: "700",
     color: colors.textPrimary,
     textAlign: "center",
     marginBottom: spacing.xxs,
   },
-  productPrice: {
-    ...typography.bodyMedium,
-    color: colors.primary,
+  productDescription: {
+    ...typography.tiny,
+    color: colors.textSecondary,
+    textAlign: "center",
     marginBottom: spacing.sm,
+    flex: 1,
+  },
+  productFooter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  productPrice: {
+    ...typography.h3,
+    color: colors.primary,
+  },
+  productPriceDisabled: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontStyle: "italic",
+    textAlign: "center",
+    width: "100%",
   },
   addBtn: {
     width: 36,
@@ -262,58 +342,79 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  orderCard: {
+  quantityBadge: {
+    position: "absolute",
+    top: spacing.sm,
+    left: spacing.sm,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quantityText: {
+    ...typography.tiny,
+    color: colors.lightText,
+    fontWeight: "700",
+  },
+  featuresSection: {
+    marginBottom: spacing.xl,
+  },
+  featureCard: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: colors.card,
     borderRadius: radius.lg,
     padding: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
     ...shadow.sm,
   },
-  orderIcon: {
-    width: 52,
-    height: 52,
+  featureIcon: {
+    width: 48,
+    height: 48,
     borderRadius: radius.md,
-    backgroundColor: colors.surfaceTeal,
     alignItems: "center",
     justifyContent: "center",
   },
-  orderInfo: {
+  featureContent: {
     flex: 1,
     marginLeft: spacing.md,
   },
-  orderName: {
+  featureTitle: {
     ...typography.bodyMedium,
+    fontWeight: "600",
     color: colors.textPrimary,
+    marginBottom: 2,
   },
-  orderDate: {
+  featureText: {
     ...typography.small,
     color: colors.textSecondary,
-    marginTop: 2,
   },
-  statusBadge: {
-    flexDirection: "row",
+  emptyOrders: {
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
     alignItems: "center",
-    gap: spacing.xxs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
-    borderRadius: radius.full,
+    ...shadow.sm,
   },
-  statusProcessing: {
-    backgroundColor: colors.lightYellow,
+  emptyOrdersIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.xl,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.md,
   },
-  statusShipped: {
-    backgroundColor: colors.surfaceBlue,
+  emptyOrdersTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
   },
-  statusText: {
-    ...typography.tiny,
-    fontWeight: "600",
-  },
-  statusTextProcessing: {
-    color: colors.warning,
-  },
-  statusTextShipped: {
-    color: colors.accentBlue,
+  emptyOrdersText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: "center",
   },
 });

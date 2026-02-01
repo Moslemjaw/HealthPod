@@ -9,6 +9,10 @@ export const config = {
     baudRate: Number(process.env.ARDUINO_BAUD_RATE || 115200),
     mock: process.env.ARDUINO_MOCK === "true",
   },
+  deepseek: {
+    apiKey: process.env.DEEPSEEK_API_KEY || "",
+    baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
+  },
 };
 
 

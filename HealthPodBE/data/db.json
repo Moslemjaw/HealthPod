@@ -1,25 +1,122 @@
 {
   "devices": [
     {
-      "id": "b3c741de-1382-4857-aca0-425001678973",
+      "id": "5379ae09-a43d-406c-857a-56ea922c83de",
       "type": "healthpod_dispenser",
       "name": "HealthPod Dispenser",
       "serialNumber": "115200",
       "containers": [
         {
           "number": 1,
-          "stockLevel": "LOW"
+          "stockLevel": "FULL",
+          "medicationId": "6ce7b535-4c9f-4bf7-ad7a-6b358ec62581",
+          "medicationName": "Paracetamol",
+          "dosage": "1 pill",
+          "reminderTime": "08:00",
+          "reminderDays": [
+            "Sun",
+            "Tue",
+            "Thu",
+            "Sat"
+          ],
+          "reminderEnabled": true
         },
         {
           "number": 2,
-          "stockLevel": "LOW"
+          "stockLevel": "FULL",
+          "medicationId": "71a4f41c-adad-4e90-b21b-8924ab3a7556",
+          "medicationName": "Amoxicillin",
+          "dosage": "1 pill",
+          "reminderTime": "15:00",
+          "reminderDays": [
+            "Sun",
+            "Mon",
+            "Tue",
+            "Wed",
+            "Thu",
+            "Fri",
+            "Sat"
+          ],
+          "reminderEnabled": true
         },
         {
           "number": 3,
-          "stockLevel": "LOW"
+          "stockLevel": "FULL",
+          "medicationId": "097b8f33-e422-406b-9943-cc69b238760b",
+          "medicationName": "Ibuprofen",
+          "dosage": "1 pill",
+          "reminderTime": "18:00",
+          "reminderDays": [
+            "Sun",
+            "Mon",
+            "Tue",
+            "Wed",
+            "Thu",
+            "Fri",
+            "Sat"
+          ],
+          "reminderEnabled": true
         }
       ]
     }
   ],
-  "medications": []
+  "medications": [
+    {
+      "id": "6ce7b535-4c9f-4bf7-ad7a-6b358ec62581",
+      "name": "Paracetamol",
+      "dosage": "1 pill",
+      "schedule": "Sun, Tue, Thu, Sat at 08:00",
+      "time": "08:00",
+      "days": [
+        "Sun",
+        "Tue",
+        "Thu",
+        "Sat"
+      ],
+      "containerNumber": 1,
+      "remaining": 30,
+      "total": 30,
+      "refillThreshold": 5
+    },
+    {
+      "id": "71a4f41c-adad-4e90-b21b-8924ab3a7556",
+      "name": "Amoxicillin",
+      "dosage": "1 pill",
+      "schedule": "Daily at 15:00",
+      "time": "15:00",
+      "days": [
+        "Sun",
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat"
+      ],
+      "containerNumber": 2,
+      "remaining": 30,
+      "total": 30,
+      "refillThreshold": 5
+    },
+    {
+      "id": "097b8f33-e422-406b-9943-cc69b238760b",
+      "name": "Ibuprofen",
+      "dosage": "1 pill",
+      "schedule": "Daily at 18:00",
+      "time": "18:00",
+      "days": [
+        "Sun",
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat"
+      ],
+      "containerNumber": 3,
+      "remaining": 30,
+      "total": 30,
+      "refillThreshold": 5
+    }
+  ]
 }

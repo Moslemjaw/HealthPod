@@ -1,9 +1,10 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, Alert } from "react-native";
+import { Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, Alert, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeInDown, FadeInUp } from "react-native-reanimated";
+import * as ImagePicker from "expo-image-picker";
 import { colors, radius, shadow, spacing, gradients, typography } from "@/constants/design";
 import { routes } from "@/constants/routes";
 import { useHealth } from "@/context/HealthContext";
@@ -36,7 +37,24 @@ const SettingRow = ({ icon, label, onPress, badge, color = colors.primary, bg = 
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { user, signOut, streak, deleteAllUsers } = useHealth();
+  const { user, signOut, streak, updateProfile } = useHealth();
+
+  const handlePickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+
+      if (!result.canceled) {
+        updateProfile({ avatarUri: result.assets[0].uri });
+      }
+    } catch (error) {
+      Alert.alert("Error", "Could not select image.");
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -71,14 +89,23 @@ export default function SettingsScreen() {
           {/* Profile Card */}
           <Animated.View entering={FadeInDown.delay(100).duration(500)}>
             <Pressable style={styles.profileCard} onPress={() => router.push(routes.profile)}>
-              <LinearGradient
-                colors={gradients.primary}
-                style={styles.avatar}
-              >
-                <Text style={styles.avatarText}>
-                  {(user?.name || "A").charAt(0).toUpperCase()}
-                </Text>
-              </LinearGradient>
+              <Pressable onPress={handlePickImage} style={styles.avatarContainer}>
+                {user?.avatarUri ? (
+                  <Image source={{ uri: user.avatarUri }} style={styles.avatarImage} />
+                ) : (
+                  <LinearGradient
+                    colors={gradients.primary}
+                    style={styles.avatar}
+                  >
+                    <Text style={styles.avatarText}>
+                      {(user?.name || "A").charAt(0).toUpperCase()}
+                    </Text>
+                  </LinearGradient>
+                )}
+                <View style={styles.editBadge}>
+                  <Ionicons name="camera" size={10} color="white" />
+                </View>
+              </Pressable>
               <View style={styles.profileInfo}>
                 <Text style={styles.profileName}>{user?.name || "HealthPod User"}</Text>
                 <Text style={styles.profileEmail}>{user?.email || "user@healthpod.app"}</Text>
@@ -173,35 +200,6 @@ export default function SettingsScreen() {
             </View>
           </Animated.View>
 
-          {/* Developer Section (Hidden or Bottom) */}
-          <Animated.View entering={FadeInUp.delay(550).duration(500)}>
-            <Text style={styles.sectionLabel}>DEVELOPER</Text>
-            <View style={styles.section}>
-              <SettingRow 
-                icon="trash-bin-outline" 
-                label="Delete All Users (Reset App)"
-                onPress={() => {
-                  Alert.alert(
-                    "Delete All Users", 
-                    "This will delete ALL local user accounts and reset the app. Cannot be undone.",
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      { 
-                        text: "Delete All", 
-                        style: "destructive", 
-                        onPress: async () => {
-                          await deleteAllUsers();
-                          router.replace(routes.onboarding);
-                        }
-                      }
-                    ]
-                  );
-                }}
-                danger
-              />
-            </View>
-          </Animated.View>
-
           {/* App Info */}
           <Animated.View 
             entering={FadeInUp.delay(600).duration(500)}
@@ -244,12 +242,33 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
     ...shadow.md,
   },
+  avatarContainer: {
+    position: "relative",
+  },
   avatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
+  },
+  avatarImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  editBadge: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    backgroundColor: colors.primary,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.card,
   },
   avatarText: {
     ...typography.h2,

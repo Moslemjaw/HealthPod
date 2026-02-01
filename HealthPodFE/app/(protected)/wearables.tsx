@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "@/components/Screen";
 import { SectionHeader } from "@/components/SectionHeader";
 import { colors, radius, shadow, spacing } from "@/constants/design";
-import { getDevices, resetArduinoConnection } from "@/services/api";
+import { getDevices, resetArduinoConnection, deleteDevice } from "@/services/api";
 import { DeviceInfo } from "@/types";
 
 export default function WearablesScreen() {
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [reconnecting, setReconnecting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const loadDevices = () => {
     setLoading(true);
@@ -25,14 +26,44 @@ export default function WearablesScreen() {
 
   const handleReconnect = async () => {
     setReconnecting(true);
-    await resetArduinoConnection();
-    loadDevices();
-    setReconnecting(false);
+    try {
+      await resetArduinoConnection();
+      loadDevices();
+    } catch (error) {
+      Alert.alert("Error", "Failed to reconnect.");
+    } finally {
+      setReconnecting(false);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    Alert.alert(
+      "Delete Device",
+      "Are you sure you want to delete this device? This will remove the device and its configuration.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive",
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await deleteDevice(id);
+              loadDevices();
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete device.");
+            } finally {
+              setDeleting(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   return (
     <Screen>
-      <SectionHeader title="Connected Devices" subtitle="HealthPod dispenser status." />
+      <SectionHeader title="Connected Devices" subtitle="Manage your HealthPod devices." />
       {loading ? (
         <ActivityIndicator size="large" color={colors.primary} />
       ) : devices.length === 0 ? (
@@ -64,15 +95,27 @@ export default function WearablesScreen() {
                 </Text>
               </View>
             </View>
-            {!device.isConnected && (
-              <Pressable style={styles.reconnectBtn} onPress={handleReconnect} disabled={reconnecting}>
-                {reconnecting ? (
-                  <ActivityIndicator color={colors.lightText} />
-                ) : (
-                  <Text style={styles.reconnectText}>Reconnect</Text>
-                )}
+            
+            <View style={styles.actionsRow}>
+              {!device.isConnected && (
+                <Pressable style={styles.reconnectBtn} onPress={handleReconnect} disabled={reconnecting}>
+                  {reconnecting ? (
+                    <ActivityIndicator color={colors.lightText} size="small" />
+                  ) : (
+                    <Text style={styles.reconnectText}>Reconnect</Text>
+                  )}
+                </Pressable>
+              )}
+              
+              <Pressable 
+                style={[styles.deleteBtn, device.isConnected && styles.deleteBtnFull]} 
+                onPress={() => handleDelete(device.id)}
+                disabled={deleting}
+              >
+                <Ionicons name="trash-outline" size={18} color={colors.error} />
+                <Text style={styles.deleteText}>Delete</Text>
               </Pressable>
-            )}
+            </View>
           </View>
         ))
       )}
@@ -111,6 +154,7 @@ const styles = StyleSheet.create({
   },
   deviceMeta: {
     color: colors.textSecondary,
+    fontSize: 12,
   },
   statusPill: {
     paddingHorizontal: spacing.sm,
@@ -133,15 +177,40 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 12,
   },
+  actionsRow: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
   reconnectBtn: {
-    marginTop: spacing.sm,
+    flex: 1,
     backgroundColor: colors.primary,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
     alignItems: "center",
+    justifyContent: "center",
+    minHeight: 40,
   },
   reconnectText: {
     color: colors.lightText,
+    fontWeight: "600",
+  },
+  deleteBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    backgroundColor: colors.lightRed,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    minHeight: 40,
+  },
+  deleteBtnFull: {
+    // If it's the only button, let it take full width or whatever styling fits
+  },
+  deleteText: {
+    color: colors.error,
     fontWeight: "600",
   },
   emptyCard: {

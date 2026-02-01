@@ -78,7 +78,7 @@ export default function RegisterScreen() {
             <View style={styles.titleContainer}>
               <View style={styles.logoWrapper}>
                 <Image 
-                  source={require("@/assets/HealthPodLogo.png")} 
+                  source={require("@/assets/HealthPodNewLogo.png")} 
                   style={styles.logoSmall} 
                   resizeMode="contain" 
                 />

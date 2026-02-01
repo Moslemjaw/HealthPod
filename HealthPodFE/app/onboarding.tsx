@@ -65,7 +65,7 @@ export default function OnboardingScreen() {
           <View style={styles.logoContainer}>
             <View style={styles.logoRing}>
               <Image 
-                source={require("@/assets/HealthPodLogo.png")} 
+                source={require("@/assets/HealthPodNewLogo.png")} 
                 style={styles.logoImage} 
                 resizeMode="contain" 
               />

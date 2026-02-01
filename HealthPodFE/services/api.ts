@@ -46,9 +46,16 @@ export function getMedications() {
   return request<Medication[]>("/api/medications");
 }
 
-export function addMedication(payload: Omit<Medication, "id">) {
+export function addMedication(payload: Partial<Omit<Medication, "id">>) {
   return request<Medication>("/api/medications", {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateMedication(id: string, payload: Partial<Medication>) {
+  return request<Medication>(`/api/medications/${id}`, {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }
@@ -111,6 +118,10 @@ export function getArduinoStatus() {
 
 export function resetArduinoConnection() {
   return request("/api/arduino/reset", { method: "POST" });
+}
+
+export function refreshStockLevels() {
+  return request("/api/arduino/refresh", { method: "POST" });
 }
 
 

@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, Pressable, Dimensions } from "react-native";
+import { StyleSheet, Text, View, ScrollView, SafeAreaView, Pressable, Dimensions, RefreshControl } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown, FadeInRight, FadeInUp } from "react-native-reanimated";
 import { colors, radius, shadow, spacing, gradients, typography } from "@/constants/design";
 import { useHealth } from "@/context/HealthContext";
 import { useRouter } from "expo-router";
-import { routes } from "@/constants/routes";
-import { getMedications, getSchedules } from "@/services/api";
+import { getMedications, getSchedules, confirmSchedule } from "@/services/api";
 import { Medication, ScheduleItem } from "@/types";
 
 const { width } = Dimensions.get("window");
@@ -31,50 +30,75 @@ export default function HomeScreen() {
   const { user, health, streak } = useHealth();
   const [medications, setMedications] = useState<Medication[]>([]);
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
-  const [nextMed, setNextMed] = useState<{ med: Medication; schedule: ScheduleItem } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchData = async () => {
+    try {
+      const [medsData, schedulesData] = await Promise.all([
+        getMedications(),
+        getSchedules()
+      ]);
+      console.log("[Home] Fetched", medsData.length, "medications");
+      console.log("[Home] Fetched", schedulesData.length, "schedules");
+      setMedications(medsData);
+      setSchedules(schedulesData);
+    } catch (error) {
+      console.error("[Home] Error fetching data:", error);
+    }
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [medsData, scheduleData] = await Promise.all([
-          getMedications(),
-          getSchedules(),
-        ]);
-        setMedications(medsData);
-        setSchedules(scheduleData);
-        
-        // Find next upcoming medication
-        const now = new Date();
-        const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-        
-        const upcoming = scheduleData
-          .filter(s => !s.isConfirmed && s.time >= currentTime)
-          .sort((a, b) => a.time.localeCompare(b.time))[0];
-        
-        if (upcoming) {
-          const med = medsData.find(m => m.id === upcoming.medicationId);
-          if (med) {
-            setNextMed({ med, schedule: upcoming });
-          }
-        } else {
-          // If no upcoming today, get first unconfirmed one
-          const firstUnconfirmed = scheduleData
-            .filter(s => !s.isConfirmed)
-            .sort((a, b) => a.time.localeCompare(b.time))[0];
-          if (firstUnconfirmed) {
-            const med = medsData.find(m => m.id === firstUnconfirmed.medicationId);
-            if (med) {
-              setNextMed({ med, schedule: firstUnconfirmed });
-            }
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching home data:", error);
-      }
-    };
-    
     fetchData();
   }, []);
+
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    fetchData().finally(() => setRefreshing(false));
+  }, []);
+
+  // Get next upcoming medication
+  const getNextMedication = () => {
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const today = days[now.getDay()];
+    
+    // Filter schedules for today
+    const todaysSchedules = schedules.filter(s => 
+      !s.days || s.days.length === 0 || s.days.includes(today)
+    );
+
+    // Find next unconfirmed schedule for today
+    const upcoming = todaysSchedules
+      .filter(s => !s.isConfirmed && s.time >= currentTime)
+      .sort((a, b) => a.time.localeCompare(b.time))[0];
+    
+    if (upcoming) {
+      const med = medications.find(m => m.id === upcoming.medicationId);
+      return { schedule: upcoming, medication: med };
+    }
+    
+    // If no upcoming today left, show first schedule of today (if any)
+    if (todaysSchedules.length > 0) {
+      todaysSchedules.sort((a, b) => a.time.localeCompare(b.time));
+      const first = todaysSchedules[0];
+      const med = medications.find(m => m.id === first.medicationId);
+      return { schedule: first, medication: med };
+    }
+    
+    return null;
+  };
+
+  const handleTakeMedication = async (scheduleId: string) => {
+    try {
+      await confirmSchedule(scheduleId);
+      setSchedules(prev => prev.map(s => 
+        s.id === scheduleId ? { ...s, isConfirmed: true } : s
+      ));
+    } catch (error) {
+      console.error("[Home] Error confirming:", error);
+    }
+  };
 
   const getStatValue = (key: string) => {
     switch (key) {
@@ -84,6 +108,15 @@ export default function HomeScreen() {
       case "water": return `${health.hydration}/8`;
       default: return "—";
     }
+  };
+
+  const nextMed = getNextMedication();
+  const formatTime = (time: string) => {
+    const [hours, minutes] = time.split(':');
+    const h = parseInt(hours);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${minutes} ${ampm}`;
   };
 
   return (
@@ -103,13 +136,16 @@ export default function HomeScreen() {
             onPress={() => router.push("/(protected)/notifications")}
           >
             <Ionicons name="notifications-outline" size={24} color={colors.textPrimary} />
-            <View style={styles.notificationDot} />
+            {schedules.filter(s => !s.isConfirmed).length > 0 && (
+              <View style={styles.notificationDot} />
+            )}
           </Pressable>
         </Animated.View>
 
         <ScrollView 
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           {/* Streak Card */}
           <Animated.View 
@@ -189,20 +225,28 @@ export default function HomeScreen() {
           </View>
 
           {/* Next Reminder */}
-          {nextMed && (
-            <Animated.View 
-              entering={FadeInUp.delay(500).duration(600)} 
-              style={styles.section}
-            >
-              <Text style={styles.sectionTitle}>Up Next</Text>
+          <Animated.View 
+            entering={FadeInUp.delay(500).duration(600)} 
+            style={styles.section}
+          >
+            <Text style={styles.sectionTitle}>Up Next</Text>
+            {nextMed?.medication ? (
               <View style={styles.reminderCard}>
                 <View style={styles.reminderHeader}>
                   <View style={styles.timeBadge}>
                     <Ionicons name="time-outline" size={16} color={colors.primaryDark} />
-                    <Text style={styles.timeText}>{nextMed.schedule.time}</Text>
+                    <Text style={styles.timeText}>{formatTime(nextMed.schedule.time)}</Text>
                   </View>
-                  <View style={[styles.statusBadge, { backgroundColor: colors.surfaceTeal }]}>
-                    <Text style={[styles.statusText, { color: colors.primaryDark }]}>Upcoming</Text>
+                  <View style={[
+                    styles.statusBadge, 
+                    { backgroundColor: nextMed.schedule.isConfirmed ? colors.surfaceAlt : colors.surfaceTeal }
+                  ]}>
+                    <Text style={[
+                      styles.statusText, 
+                      { color: nextMed.schedule.isConfirmed ? colors.textMuted : colors.primaryDark }
+                    ]}>
+                      {nextMed.schedule.isConfirmed ? "Taken" : "Upcoming"}
+                    </Text>
                   </View>
                 </View>
                 
@@ -211,13 +255,69 @@ export default function HomeScreen() {
                     <Ionicons name="medical" size={24} color={colors.primary} />
                   </View>
                   <View style={styles.medInfo}>
-                    <Text style={styles.medName}>{nextMed.med.name}</Text>
-                    <Text style={styles.medDose}>{nextMed.med.dosage} • Take with food</Text>
+                    <Text style={styles.medName}>{nextMed.medication.name}</Text>
+                    <Text style={styles.medDose}>{nextMed.medication.dosage} • {nextMed.schedule.frequency}</Text>
                   </View>
-                  <Pressable style={styles.checkBtn}>
-                    <Ionicons name="checkmark" size={20} color={colors.lightText} />
-                  </Pressable>
+                  {!nextMed.schedule.isConfirmed && (
+                    <Pressable 
+                      style={styles.checkBtn}
+                      onPress={() => handleTakeMedication(nextMed.schedule.id)}
+                    >
+                      <Ionicons name="checkmark" size={20} color={colors.lightText} />
+                    </Pressable>
+                  )}
                 </View>
+              </View>
+            ) : (
+              <View style={styles.emptyReminderCard}>
+                <Ionicons name="checkmark-circle-outline" size={32} color={colors.success} />
+                <Text style={styles.emptyReminderText}>
+                  {medications.length > 0 
+                    ? "All medications taken for today!" 
+                    : "No medications scheduled. Add a device to get started."}
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+
+          {/* Today's Medications */}
+          {medications.length > 0 && (
+            <Animated.View 
+              entering={FadeInUp.delay(600).duration(600)} 
+              style={styles.section}
+            >
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Today's Medications</Text>
+                <Pressable onPress={() => router.push("/(protected)/(tabs)/schedule")}>
+                  <Text style={styles.seeAllText}>See All</Text>
+                </Pressable>
+              </View>
+              <View style={styles.medsList}>
+                {medications
+                  .filter(med => {
+                    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+                    const today = days[new Date().getDay()];
+                    return !med.days || med.days.length === 0 || med.days.includes(today);
+                  })
+                  .slice(0, 3).map((med, i) => {
+                  const schedule = schedules.find(s => s.medicationId === med.id);
+                  return (
+                    <View key={med.id} style={styles.medRow}>
+                      <View style={[styles.medRowIcon, { backgroundColor: colors.surfaceTeal }]}>
+                        <Ionicons name="medical" size={16} color={colors.primary} />
+                      </View>
+                      <View style={styles.medRowInfo}>
+                        <Text style={styles.medRowName}>{med.name}</Text>
+                        <Text style={styles.medRowDetails}>
+                          {med.dosage} • {schedule ? formatTime(schedule.time) : med.time || "—"}
+                        </Text>
+                      </View>
+                      {schedule?.isConfirmed && (
+                        <Ionicons name="checkmark-circle" size={20} color={colors.success} />
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             </Animated.View>
           )}
@@ -339,9 +439,21 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: spacing.xl,
   },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.md,
+  },
   sectionTitle: {
     ...typography.h3,
     color: colors.textPrimary,
+    marginBottom: spacing.md,
+  },
+  seeAllText: {
+    ...typography.small,
+    color: colors.primary,
+    fontWeight: "600",
     marginBottom: spacing.md,
   },
   quickGrid: {
@@ -420,6 +532,20 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
     ...shadow.sm,
   },
+  emptyReminderCard: {
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  emptyReminderText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: "center",
+  },
   reminderHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -483,5 +609,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     ...shadow.sm,
+  },
+  medsList: {
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    gap: spacing.xs,
+  },
+  medRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: spacing.sm,
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceAlt,
+    gap: spacing.md,
+  },
+  medRowIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  medRowInfo: {
+    flex: 1,
+  },
+  medRowName: {
+    ...typography.bodyMedium,
+    color: colors.textPrimary,
+    fontWeight: "600",
+  },
+  medRowDetails: {
+    ...typography.small,
+    color: colors.textSecondary,
   },
 });

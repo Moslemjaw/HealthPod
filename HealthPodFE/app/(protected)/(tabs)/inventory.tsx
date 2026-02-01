@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View, ScrollView, SafeAreaView, RefreshControl, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
-import Animated, { FadeInDown, FadeInUp, Layout } from "react-native-reanimated";
+import Animated, { FadeInDown, FadeInUp, Layout, useSharedValue, useAnimatedStyle, withRepeat, withTiming, Easing, cancelAnimation } from "react-native-reanimated";
 import { colors, radius, shadow, spacing, typography } from "@/constants/design";
-import { getMedications, getDevices, dispenseFromContainer, getArduinoStatus, resetArduinoConnection } from "@/services/api";
+import { getMedications, getDevices, dispenseFromContainer, getArduinoStatus, resetArduinoConnection, refreshStockLevels } from "@/services/api";
 import { useRouter } from "expo-router";
 import { DeviceInfo, Medication } from "@/types";
 
@@ -18,25 +17,56 @@ export default function InventoryScreen() {
   const [isConnected, setIsConnected] = useState(false);
   const [checkingStatus, setCheckingStatus] = useState(false);
 
+  // Spinning animation for refresh button
+  const rotation = useSharedValue(0);
+  const animatedRefreshStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
+  const startSpinning = () => {
+    rotation.value = withRepeat(
+      withTiming(360, { duration: 1000, easing: Easing.linear }),
+      -1, // infinite
+      false
+    );
+  };
+
+  const stopSpinning = () => {
+    cancelAnimation(rotation);
+    rotation.value = 0;
+  };
+
   const fetchData = async () => {
     try {
-      console.log("[Inventory Screen] Starting fetch...");
-      const [medsData, devicesData] = await Promise.all([
+      console.log("[Inventory] Fetching data...");
+      
+      // First refresh stock levels from Arduino to ensure DB is updated
+      try {
+        await refreshStockLevels();
+        console.log("[Inventory] Stock levels refreshed from Arduino");
+      } catch (e) {
+        console.log("[Inventory] Could not refresh stock levels:", e);
+      }
+      
+      // Then fetch all data
+      const [medsData, devicesData, statusData] = await Promise.all([
         getMedications(),
         getDevices(),
+        getArduinoStatus() as Promise<{ isConnected: boolean }>,
       ]);
-      console.log("[Inventory Screen] Fetched medications:", medsData);
-      console.log("[Inventory Screen] Fetched devices:", devicesData);
-      console.log("[Inventory Screen] Medication count:", medsData.length);
-      console.log("[Inventory Screen] Device count:", devicesData.length);
+      
+      console.log("[Inventory] Medications:", medsData.length);
+      console.log("[Inventory] Devices:", devicesData.length);
+      if (devicesData[0]?.containers) {
+        const stocks = devicesData[0].containers.map((c: any) => `C${c.number}:${c.stockLevel}`).join(", ");
+        console.log("[Inventory] Stock levels:", stocks);
+      }
       
       setMedications(medsData);
       setDevice(devicesData[0] || null);
-      
-      checkConnection();
+      setIsConnected(!!statusData?.isConnected);
     } catch (error) {
-      console.error("[Inventory Screen] Failed to fetch inventory data", error);
-      Alert.alert("Error", `Failed to load inventory: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("[Inventory] Failed to fetch data:", error);
     }
   };
 
@@ -56,7 +86,6 @@ export default function InventoryScreen() {
     setCheckingStatus(true);
     try {
       await resetArduinoConnection();
-      // Wait a bit then check
       setTimeout(checkConnection, 2000);
     } catch (e) {
       Alert.alert("Connection Failed", "Could not reconnect to the device.");
@@ -68,19 +97,20 @@ export default function InventoryScreen() {
     fetchData().finally(() => setLoading(false));
   }, []);
 
-  // Refresh when screen comes into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      if (!loading) {
-        fetchData();
-      }
-    }, [loading])
-  );
-
-  const onRefresh = React.useCallback(() => {
+  const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    fetchData().finally(() => setRefreshing(false));
+    startSpinning();
+    try {
+      await fetchData();
+    } finally {
+      setRefreshing(false);
+      stopSpinning();
+    }
   }, []);
+
+  const handleRefreshPress = () => {
+    onRefresh();
+  };
 
   const handleDispense = async (containerNumber: number) => {
     if (!device) return;
@@ -88,27 +118,48 @@ export default function InventoryScreen() {
     setDispensing(containerNumber);
     try {
       await dispenseFromContainer(device.id, containerNumber);
-      Alert.alert("Dispensing", `Dispensing from Container ${containerNumber}...`);
-      setTimeout(() => {
-        fetchData(); 
+      Alert.alert(
+        "Dispensing", 
+        `Dispensing from Container ${containerNumber}...`,
+        [{ text: "OK" }]
+      );
+      
+      // Wait for dispensing to complete, then refresh multiple times
+      // to catch the updated stock level from the sensor
+      setTimeout(async () => {
+        console.log("[Inventory] Refreshing after dispense (1)...");
+        await fetchData();
+      }, 2000);
+      
+      setTimeout(async () => {
+        console.log("[Inventory] Refreshing after dispense (2)...");
+        await fetchData();
         setDispensing(null);
-      }, 3000);
+      }, 4000);
+      
     } catch (error) {
       Alert.alert("Error", "Failed to dispense. Check device connection.");
       setDispensing(null);
     }
   };
 
-  const handleEdit = (containerNumber: number, medName?: string, dosage?: string, schedule?: string) => {
+  const handleEdit = (containerNumber: number) => {
     if (!device) return;
+    
+    // Find the medication for this container
+    const med = medications.find(m => m.containerNumber === containerNumber);
+    const container = device.containers.find(c => c.number === containerNumber);
+    
     router.push({
       pathname: "/(protected)/edit-container",
       params: { 
         deviceId: device.id, 
         containerNumber,
-        medName: medName || "",
-        dosage: dosage || "",
-        schedule: schedule || ""
+        medId: med?.id || "",
+        medName: med?.name || container?.medicationName || "",
+        dosage: med?.dosage || container?.dosage || "",
+        time: med?.time || container?.reminderTime || "",
+        days: med?.days?.join(",") || container?.reminderDays?.join(",") || ""
       }
     });
   };
@@ -118,6 +169,11 @@ export default function InventoryScreen() {
     if (stockLevel === "FULL") return { label: "In Stock", color: colors.success, bg: colors.surfaceTeal, icon: "checkmark-circle" };
     if (stockLevel === "MED") return { label: "Available", color: colors.primary, bg: colors.surfaceBlue, icon: "information-circle" };
     return { label: "Empty", color: colors.error, bg: colors.lightRed, icon: "alert-circle" };
+  };
+
+  // Get medication info for a container
+  const getMedForContainer = (containerNumber: number) => {
+    return medications.find(m => m.containerNumber === containerNumber);
   };
 
   if (loading) {
@@ -146,8 +202,14 @@ export default function InventoryScreen() {
               <Text style={styles.title}>Inventory</Text>
               <Text style={styles.subtitle}>Manage dispenser & medications</Text>
             </View>
-            <Pressable onPress={onRefresh} style={styles.refreshBtn}>
-              <Ionicons name="refresh" size={20} color={colors.primary} />
+            <Pressable 
+              onPress={handleRefreshPress} 
+              style={[styles.refreshBtn, refreshing && styles.refreshBtnActive]}
+              disabled={refreshing}
+            >
+              <Animated.View style={animatedRefreshStyle}>
+                <Ionicons name="refresh" size={20} color={refreshing ? colors.lightText : colors.primary} />
+              </Animated.View>
             </Pressable>
           </Animated.View>
 
@@ -166,7 +228,7 @@ export default function InventoryScreen() {
                     {isConnected ? "Connected" : "Disconnected"}
                   </Text>
                   <Text style={styles.statusSubtitle}>
-                    {device?.name || "HealthPod Device"}
+                    {device?.name || "No Device"}
                   </Text>
                 </View>
               </View>
@@ -187,17 +249,36 @@ export default function InventoryScreen() {
             </View>
           </Animated.View>
 
-          {/* Section 2: My Medications (Merged Stock Status) */}
+          {/* No Device State */}
+          {!device && (
+            <View style={styles.emptyState}>
+              <Ionicons name="cube-outline" size={64} color={colors.textMuted} />
+              <Text style={styles.emptyTitle}>No Device Connected</Text>
+              <Text style={styles.emptyText}>
+                Add a HealthPod dispenser to manage your medications
+              </Text>
+              <Pressable 
+                style={styles.addDeviceBtn}
+                onPress={() => router.push("/(protected)/add-device")}
+              >
+                <Ionicons name="add" size={20} color={colors.lightText} />
+                <Text style={styles.addDeviceBtnText}>Add Device</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {/* Section 2: My Medications */}
           {device && device.containers && (
             <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.section}>
               <Text style={styles.sectionTitle}>My Medications</Text>
               
               {[1, 2, 3].map((num) => {
                 const container = device.containers.find(c => c.number === num);
-                // Find med details if available
-                const medDetails = medications.find(m => m.name === container?.medicationName);
+                const med = getMedForContainer(num);
                 const isDispensing = dispensing === num;
-                const status = getStockStatus(container?.stockLevel || "FULL");
+                const status = getStockStatus(container?.stockLevel || "LOW");
+                const hasMed = !!(med?.name || container?.medicationName);
+                const isEmpty = status.label === "Empty";
                 
                 return (
                   <Animated.View 
@@ -207,25 +288,31 @@ export default function InventoryScreen() {
                     style={styles.medCard}
                   >
                     <View style={styles.medHeader}>
-                      <View style={[styles.medIcon, { backgroundColor: status.bg }]}>
-                        <Ionicons name="medical" size={20} color={status.color} />
+                      <View style={[styles.medIcon, { backgroundColor: hasMed ? status.bg : colors.surfaceAlt }]}>
+                        <Ionicons 
+                          name={hasMed ? "medical" : "add"} 
+                          size={20} 
+                          color={hasMed ? status.color : colors.textMuted} 
+                        />
                       </View>
                       <View style={styles.medInfo}>
                         <View style={styles.medTitleRow}>
                           <Text style={styles.medName}>
-                            {container?.medicationName || `Container ${num}`}
+                            {med?.name || container?.medicationName || `Container ${num}`}
                           </Text>
-                          <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
-                            <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
-                          </View>
+                          {hasMed && (
+                            <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+                              <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+                            </View>
+                          )}
                         </View>
                         <Text style={styles.medDosage}>
-                          {container?.dosage || "—"}
+                          {med?.dosage || container?.dosage || (hasMed ? "—" : "Empty slot")}
                         </Text>
                       </View>
                       <Pressable 
                         style={styles.editBtn}
-                        onPress={() => handleEdit(num, container?.medicationName, container?.dosage, medDetails?.schedule)}
+                        onPress={() => handleEdit(num)}
                       >
                         <Ionicons name="pencil" size={16} color={colors.primary} />
                       </Pressable>
@@ -235,17 +322,22 @@ export default function InventoryScreen() {
                       <View style={styles.scheduleRow}>
                         <Ionicons name="time-outline" size={14} color={colors.textMuted} />
                         <Text style={styles.scheduleText}>
-                          {medDetails?.schedule || "No Schedule"}
+                          {med?.time 
+                            ? `${med.time} • ${med.days?.length === 7 ? "Daily" : med.days?.join(", ") || "Daily"}`
+                            : container?.reminderTime 
+                              ? `${container.reminderTime} • ${container.reminderDays?.length === 7 || !container.reminderDays ? "Daily" : container.reminderDays.join(", ")}`
+                              : "No Schedule"
+                          }
                         </Text>
                       </View>
 
                       <Pressable 
                         style={[
                           styles.dispenseBtn, 
-                          (isDispensing || !container?.medicationName) && styles.dispenseBtnDisabled
+                          (isDispensing || !hasMed || isEmpty) && styles.dispenseBtnDisabled
                         ]}
                         onPress={() => handleDispense(num)}
-                        disabled={isDispensing || !container?.medicationName}
+                        disabled={isDispensing || !hasMed || isEmpty}
                       >
                         {isDispensing ? (
                           <ActivityIndicator size="small" color={colors.lightText} />
@@ -266,8 +358,6 @@ export default function InventoryScreen() {
           <View style={{ height: 100 }} />
         </ScrollView>
       </SafeAreaView>
-      
-      {/* FAB Removed as per request */}
     </View>
   );
 }
@@ -299,6 +389,9 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.full,
+  },
+  refreshBtnActive: {
+    backgroundColor: colors.primary,
   },
   title: {
     ...typography.h1,
@@ -360,35 +453,36 @@ const styles = StyleSheet.create({
     color: colors.lightText,
     fontWeight: "600",
   },
-  containersGrid: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
-  stockCard: {
-    flex: 1,
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-    ...shadow.sm,
-  },
-  stockHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  emptyState: {
     alignItems: "center",
-    padding: spacing.sm,
+    justifyContent: "center",
+    paddingVertical: spacing.xxxl,
+    paddingHorizontal: spacing.xl,
   },
-  stockTitle: {
-    ...typography.small,
-    fontWeight: "700",
+  emptyTitle: {
+    ...typography.h3,
+    color: colors.textPrimary,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
-  stockBody: {
-    padding: spacing.md,
+  emptyText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    textAlign: "center",
+    marginBottom: spacing.lg,
+  },
+  addDeviceBtn: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
   },
-  stockStatus: {
-    ...typography.small,
+  addDeviceBtnText: {
+    ...typography.body,
+    color: colors.lightText,
     fontWeight: "600",
   },
   medCard: {
@@ -459,10 +553,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: radius.sm,
+    flex: 1,
+    marginRight: spacing.sm,
   },
   scheduleText: {
     ...typography.caption,
     color: colors.textSecondary,
+    flex: 1,
   },
   dispenseBtn: {
     backgroundColor: colors.primary,

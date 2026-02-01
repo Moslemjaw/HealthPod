@@ -4,14 +4,16 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { FadeInDown, FadeInUp, SlideInRight } from "react-native-reanimated";
 import { colors, radius, shadow, spacing, typography } from "@/constants/design";
-import { createDevice, getArduinoStatus, resetArduinoConnection, addMedication, updateContainer } from "@/services/api";
+import { createDevice, getArduinoStatus, addMedication, updateContainer } from "@/services/api";
 import { PrimaryButton } from "@/components/PrimaryButton";
+
+const ALL_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 type MedInput = {
   name: string;
-  frequency: string;
   dosage: string;
   time: string;
+  days: string[];
 };
 
 export default function AddDeviceScreen() {
@@ -23,9 +25,9 @@ export default function AddDeviceScreen() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
   
   const [meds, setMeds] = useState<MedInput[]>([
-    { name: "", frequency: "Daily", dosage: "1 pill", time: "08:00" },
-    { name: "", frequency: "Daily", dosage: "1 pill", time: "13:00" },
-    { name: "", frequency: "Daily", dosage: "1 pill", time: "18:00" },
+    { name: "", dosage: "1 pill", time: "08:00", days: [...ALL_DAYS] },
+    { name: "", dosage: "1 pill", time: "13:00", days: [...ALL_DAYS] },
+    { name: "", dosage: "1 pill", time: "18:00", days: [...ALL_DAYS] },
   ]);
 
   const handleConnectDevice = async () => {
@@ -36,86 +38,93 @@ export default function AddDeviceScreen() {
     setLoading(true);
     try {
       const device = await createDevice({ name: "HealthPod Dispenser", serialNumber: serialNumber.trim() });
-      console.log("[AddDevice] Device created:", device);
+      console.log("[AddDevice] Device created:", device.id);
       setDeviceId(device.id);
       
       const result = await getArduinoStatus() as { isConnected: boolean };
       setStatus(result?.isConnected ? "Connected" : "Disconnected");
       
+      // Move to step 2 after a short delay
       setTimeout(() => {
         setStep(2);
         setLoading(false);
       }, 1000);
       
     } catch (error) {
-      console.error("[AddDevice] Error creating device:", error);
+      console.error("[AddDevice] Connection failed:", error);
       Alert.alert("Connection Failed", "Could not connect to device. Please check the serial number and try again.");
       setLoading(false);
     }
   };
 
-  const handleUpdateMed = (index: number, field: keyof MedInput, value: string) => {
+  const handleUpdateMed = (index: number, field: keyof MedInput, value: string | string[]) => {
     const newMeds = [...meds];
     newMeds[index] = { ...newMeds[index], [field]: value };
     setMeds(newMeds);
   };
 
-  const handleFinishSetup = async () => {
-    // Validate at least one med is entered
-    const validMeds = meds.filter(m => m.name.trim());
-    if (validMeds.length === 0) {
-      Alert.alert("No Medications", "Please add at least one medication.");
-      return;
+  const toggleDay = (index: number, day: string) => {
+    const currentDays = meds[index].days;
+    if (currentDays.includes(day)) {
+      handleUpdateMed(index, "days", currentDays.filter(d => d !== day));
+    } else {
+      handleUpdateMed(index, "days", [...currentDays, day]);
     }
+  };
 
-    if (!deviceId) {
-      Alert.alert("Device Error", "Device ID is missing. Please go back and reconnect.");
+  const handleFinishSetup = async () => {
+    // Validate at least one medication is filled
+    const filledMeds = meds.filter(med => med.name.trim());
+    if (filledMeds.length === 0) {
+      Alert.alert("Missing Medications", "Please add at least one medication.");
       return;
     }
 
     setLoading(true);
+    console.log("[AddDevice] Starting setup for", filledMeds.length, "medications");
+    
     try {
-      console.log("[AddDevice] Starting medication setup for", validMeds.length, "medications");
-      
-      // Process medications sequentially to ensure they're saved properly
+      // Process each medication sequentially to avoid race conditions
       for (let index = 0; index < meds.length; index++) {
         const med = meds[index];
         if (!med.name.trim()) {
-          console.log(`[AddDevice] Skipping empty medication at index ${index}`);
+          console.log("[AddDevice] Skipping empty container", index + 1);
           continue;
         }
 
-        console.log(`[AddDevice] Processing medication ${index + 1}:`, med.name);
+        console.log("[AddDevice] Creating medication:", med.name, "for container", index + 1);
 
         // 1. Create Medication Record
-        try {
-          const createdMed = await addMedication({
-            name: med.name.trim(),
-            dosage: med.dosage.trim(),
-            schedule: `${med.frequency} at ${med.time}`,
-            remaining: 30,
-            total: 30,
-            refillThreshold: 5,
-          });
-          console.log(`[AddDevice] Medication created:`, createdMed);
+        const scheduleStr = med.days.length === 7 
+          ? `Daily at ${med.time}` 
+          : `${med.days.join(", ")} at ${med.time}`;
+        
+        const createdMed = await addMedication({
+          name: med.name,
+          dosage: med.dosage,
+          schedule: scheduleStr,
+          time: med.time,
+          days: med.days,
+          containerNumber: index + 1,
+          remaining: 30,
+          total: 30,
+          refillThreshold: 5,
+        });
+        console.log("[AddDevice] Medication created:", createdMed.id);
 
-          // 2. Associate with Device Container
-          try {
-            await updateContainer(deviceId, index + 1, {
-              medicationName: med.name.trim(),
-              dosage: med.dosage.trim(),
-              reminderEnabled: true,
-              reminderTime: med.time,
-              stockLevel: "FULL"
-            });
-            console.log(`[AddDevice] Container ${index + 1} updated successfully`);
-          } catch (containerError) {
-            console.error(`[AddDevice] Error updating container ${index + 1}:`, containerError);
-            Alert.alert("Warning", `Medication "${med.name}" was saved but container ${index + 1} update failed.`);
-          }
-        } catch (medError) {
-          console.error(`[AddDevice] Error creating medication "${med.name}":`, medError);
-          Alert.alert("Error", `Failed to save medication "${med.name}". Please try again.`);
+        // 2. Associate with Device Container
+        if (deviceId) {
+          console.log("[AddDevice] Updating container", index + 1, "for device", deviceId);
+          await updateContainer(deviceId, index + 1, {
+            medicationId: createdMed.id,
+            medicationName: med.name,
+            dosage: med.dosage,
+            reminderTime: med.time,
+            reminderDays: med.days,
+            reminderEnabled: true,
+            stockLevel: "FULL"
+          });
+          console.log("[AddDevice] Container updated successfully");
         }
       }
 
@@ -125,7 +134,7 @@ export default function AddDeviceScreen() {
       ]);
     } catch (error) {
       console.error("[AddDevice] Setup error:", error);
-      Alert.alert("Setup Error", "Some medications could not be saved. Please check your internet connection.");
+      Alert.alert("Setup Error", "Some medications could not be saved. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -147,7 +156,7 @@ export default function AddDeviceScreen() {
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Serial Number</Text>
           <TextInput
-            placeholder="e.g. HPD-2026-001"
+            placeholder="e.g. 115200"
             value={serialNumber}
             onChangeText={setSerialNumber}
             style={styles.input}
@@ -178,17 +187,24 @@ export default function AddDeviceScreen() {
       <View style={styles.headerTextContainer}>
         <Text style={styles.heroTitle}>Setup Medications</Text>
         <Text style={styles.heroSub}>
-          Add the medications you will place in the dispenser's 3 containers.
+          Add the medications you will place in each container.
         </Text>
       </View>
 
       {meds.map((med, index) => (
-        <View key={index} style={styles.medCard}>
+        <Animated.View 
+          key={index} 
+          entering={FadeInUp.delay(index * 100).duration(400)}
+          style={styles.medCard}
+        >
           <View style={styles.medCardHeader}>
             <View style={styles.containerBadge}>
               <Text style={styles.containerBadgeText}>{index + 1}</Text>
             </View>
             <Text style={styles.medCardTitle}>Container {index + 1}</Text>
+            <View style={[styles.sensorBadge, { backgroundColor: colors.surfaceTeal }]}>
+              <Text style={styles.sensorText}>C{index + 1}</Text>
+            </View>
           </View>
           
           <View style={styles.inputGroup}>
@@ -213,7 +229,7 @@ export default function AddDeviceScreen() {
                 placeholderTextColor={colors.textMuted}
               />
             </View>
-             <View style={[styles.inputGroup, { flex: 1 }]}>
+            <View style={[styles.inputGroup, { flex: 1 }]}>
               <Text style={styles.label}>Time</Text>
               <TextInput
                 placeholder="e.g. 08:00"
@@ -224,7 +240,28 @@ export default function AddDeviceScreen() {
               />
             </View>
           </View>
-        </View>
+
+          {/* Days Selection */}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Days</Text>
+            <View style={styles.daysRow}>
+              {ALL_DAYS.map((day) => {
+                const isSelected = med.days.includes(day);
+                return (
+                  <Pressable 
+                    key={day}
+                    style={[styles.dayChip, isSelected && styles.dayChipSelected]}
+                    onPress={() => toggleDay(index, day)}
+                  >
+                    <Text style={[styles.dayChipText, isSelected && styles.dayChipTextSelected]}>
+                      {day}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </Animated.View>
       ))}
 
       <View style={styles.footer}>
@@ -392,11 +429,48 @@ const styles = StyleSheet.create({
     ...typography.h3,
     fontSize: 16,
     color: colors.textPrimary,
+    flex: 1,
+  },
+  sensorBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+  },
+  sensorText: {
+    ...typography.tiny,
+    fontWeight: "700",
+    color: colors.primaryDark,
   },
   row: {
     flexDirection: "row",
     gap: spacing.md,
     marginTop: spacing.md,
+  },
+  daysRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  dayChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  dayChipSelected: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  dayChipText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    fontWeight: "600",
+  },
+  dayChipTextSelected: {
+    color: colors.lightText,
   },
   footer: {
     marginTop: spacing.md,
