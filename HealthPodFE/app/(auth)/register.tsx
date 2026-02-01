@@ -81,8 +81,8 @@ export default function RegisterScreen() {
         <PrimaryButton
           title="Create Account"
           onPress={() => {
-            signIn(email || "new@healthpod.app");
-            router.replace(routes.tabs);
+            signIn(email || "new@healthpod.app", name || undefined);
+            router.replace(routes.profileSetup);
           }}
         />
 

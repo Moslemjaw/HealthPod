@@ -11,9 +11,11 @@ export const routes = {
   chat: "/(protected)/chat",
   wearables: "/(protected)/wearables",
   profile: "/(protected)/profile",
+  profileSetup: "/(protected)/profile-setup",
   notifications: "/(protected)/notifications",
   privacy: "/(protected)/privacy",
   addDevice: "/(protected)/add-device",
+  deviceSelection: "/(protected)/device-selection",
+  deviceSetup: "/(protected)/device-setup",
   support: "/(protected)/support"
 };
-
