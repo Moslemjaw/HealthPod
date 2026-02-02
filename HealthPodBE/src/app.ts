@@ -46,3 +46,9 @@ app.listen(port, () => {
   console.log(`HealthPod API running on port ${port}`);
 });
 
+
+app.listen(port, () => {
+  // eslint-disable-next-line no-console
+  console.log(`HealthPod API running on port ${port}`);
+});
+
